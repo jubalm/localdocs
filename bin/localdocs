@@ -1,0 +1,546 @@
+#!/usr/bin/env python3
+"""
+LocalDocs - Simple documentation downloader optimized for LLM workflows
+"""
+
+import json
+import os
+import sys
+import hashlib
+import urllib.request
+import urllib.error
+from pathlib import Path
+from typing import Dict, List, Optional
+import argparse
+
+
+def find_config_path():
+    """Simple two-level config discovery"""
+    
+    # 1. Check current working directory
+    cwd_config = Path.cwd() / "localdocs.config.json"
+    if cwd_config.exists():
+        return cwd_config
+    
+    # 2. Fallback to global config
+    return Path.home() / ".localdocs" / "localdocs.config.json"
+
+
+class DocManager:
+    """Simple documentation downloader with clean markdown output and metadata tracking."""
+    
+    def __init__(self, config_path: str = None):
+        # Use auto-discovery if no path specified
+        if config_path is None:
+            self.config_path = find_config_path()
+        else:
+            self.config_path = Path(config_path)
+        
+        self.base_dir = self.config_path.parent
+        
+        # Ensure directories exist
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Load or create config
+        self.config = self._load_config()
+        
+        # Set content directory based on config
+        storage_dir = self.config.get("storage_directory", ".")
+        if storage_dir == ".":
+            self.content_dir = self.base_dir
+        else:
+            self.content_dir = self.base_dir / storage_dir
+            self.content_dir.mkdir(exist_ok=True)
+        
+        # Only create global config when actually using it
+        if not self.config_path.exists() and str(self.config_path).startswith(str(Path.home())):
+            self._save_config()
+    
+    def _load_config(self) -> dict:
+        """Load config file or create default if it doesn't exist."""
+        if self.config_path.exists():
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+                
+                # Clean up old fields from previous versions
+                if "max_keep_versions" in config:
+                    del config["max_keep_versions"]
+                    
+                return config
+        else:
+            return {
+                "storage_directory": ".",
+                "documents": {}
+            }
+    
+    def _save_config(self):
+        """Save config to disk."""
+        with open(self.config_path, 'w') as f:
+            json.dump(self.config, f, indent=2)
+    
+    def _generate_hash_id(self, url: str) -> str:
+        """Generate hash ID from URL for filename."""
+        return hashlib.sha256(url.encode('utf-8')).hexdigest()[:8]
+    
+    def _generate_filename(self, url: str) -> str:
+        """Generate hash-based filename."""
+        hash_id = self._generate_hash_id(url)
+        return f"{hash_id}.md"
+    
+    def _download_content(self, url: str) -> Optional[str]:
+        """Download content from URL."""
+        try:
+            # Create request with proper User-Agent
+            request = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (LocalDocs/1.0; Documentation Downloader)'
+            })
+            with urllib.request.urlopen(request) as response:
+                return response.read().decode('utf-8')
+        except Exception as e:
+            print(f"Error downloading {url}: {e}")
+            return None
+    
+    def validate_url(self, url: str) -> bool:
+        """Basic URL validation."""
+        try:
+            urllib.request.urlopen(urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (LocalDocs/1.0; Documentation Downloader)'
+            }))
+            return True
+        except:
+            return False
+    
+    def add_doc(self, url: str) -> Optional[str]:
+        """Download and add a document."""
+        print(f"Downloading {url}...")
+        
+        # Download content
+        content = self._download_content(url)
+        if content is None:
+            print(f"✗ Failed to download {url}")
+            return None
+        
+        # Generate hash ID and filename
+        hash_id = self._generate_hash_id(url)
+        filename = self._generate_filename(url)
+        file_path = self.content_dir / filename
+        
+        # Save clean markdown content (no frontmatter)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # Update metadata in config (preserve existing metadata)
+        if "documents" not in self.config:
+            self.config["documents"] = {}
+        
+        if hash_id not in self.config["documents"]:
+            self.config["documents"][hash_id] = {
+                "url": url,
+                "name": None,
+                "description": None
+            }
+        else:
+            # Preserve existing metadata, just update URL
+            self.config["documents"][hash_id]["url"] = url
+        
+        self._save_config()
+        
+        print(f"✓ Downloaded as {hash_id}.md")
+        return hash_id
+    
+    def add_multiple(self, urls: List[str]):
+        """Download multiple documents."""
+        print(f"Downloading {len(urls)} documents...")
+        
+        success_count = 0
+        for url in urls:
+            if self.add_doc(url):
+                success_count += 1
+        
+        print(f"\nCompleted: {success_count}/{len(urls)} documents downloaded")
+    
+    def add_from_file(self, file_path: str):
+        """Download URLs from a file."""
+        try:
+            with open(file_path, 'r') as f:
+                urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            
+            if not urls:
+                print(f"No URLs found in {file_path}")
+                return
+            
+            self.add_multiple(urls)
+        except Exception as e:
+            print(f"Error reading {file_path}: {e}")
+    
+    def add_interactive(self):
+        """Interactive mode for adding URLs."""
+        print("Enter URLs (one per line, empty line to finish):")
+        urls = []
+        
+        while True:
+            try:
+                url = input("> ").strip()
+                if not url:
+                    break
+                urls.append(url)
+            except KeyboardInterrupt:
+                print("\nCancelled")
+                return
+        
+        if urls:
+            self.add_multiple(urls)
+        else:
+            print("No URLs entered")
+    
+    def set_metadata(self, hash_id: str, name: Optional[str] = None, description: Optional[str] = None) -> bool:
+        """Set name and description for a document."""
+        if "documents" not in self.config:
+            self.config["documents"] = {}
+        
+        if hash_id not in self.config["documents"]:
+            print(f"Error: Document '{hash_id}' not found")
+            return False
+        
+        # Update metadata
+        if name is not None:
+            self.config["documents"][hash_id]["name"] = name
+        if description is not None:
+            self.config["documents"][hash_id]["description"] = description
+        
+        self._save_config()
+        
+        updates = []
+        if name is not None:
+            updates.append(f"name: '{name}'")
+        if description is not None:
+            updates.append(f"description: '{description}'")
+        
+        print(f"Updated {hash_id}: {', '.join(updates)}")
+        return True
+    
+    def list_docs(self) -> bool:
+        """List all documents with hash IDs."""
+        if "documents" not in self.config or not self.config["documents"]:
+            print("No documents found")
+            print("Use 'localdocs add <url>' to add documents")
+            return True
+        
+        docs = self.config["documents"]
+        
+        # Print header
+        print(f"{'ID':<10} {'Name':<25} {'Description'}")
+        print("-" * 70)
+        
+        # Print documents
+        for hash_id, metadata in docs.items():
+            name = metadata.get("name") or "[unnamed]"
+            description = metadata.get("description") or "[no description]"
+            
+            # Truncate long names/descriptions for display
+            if len(name) > 23:
+                name = name[:20] + "..."
+            if len(description) > 40:
+                description = description[:37] + "..."
+            
+            print(f"{hash_id:<10} {name:<25} {description}")
+        
+        print(f"\nTotal: {len(docs)} documents")
+        return True
+    
+    def update_doc(self, hash_id: str) -> bool:
+        """Re-download a specific document."""
+        if "documents" not in self.config or hash_id not in self.config["documents"]:
+            print(f"Error: Document '{hash_id}' not found")
+            return False
+        
+        url = self.config["documents"][hash_id]["url"]
+        print(f"Updating {hash_id}...")
+        
+        # Re-download (this will overwrite the existing file)
+        result = self.add_doc(url)
+        
+        if result:
+            print(f"✓ {hash_id} updated")
+            return True
+        else:
+            print(f"✗ {hash_id} update failed")
+            return False
+    
+    def update_all(self) -> int:
+        """Update all documents."""
+        if "documents" not in self.config or not self.config["documents"]:
+            print("No documents to update")
+            return 0
+        
+        docs = self.config["documents"]
+        print(f"Updating {len(docs)} documents...")
+        
+        updated_count = 0
+        for hash_id in docs.keys():
+            if self.update_doc(hash_id):
+                updated_count += 1
+        
+        print(f"\nCompleted: {updated_count}/{len(docs)} documents updated")
+        return updated_count
+    
+    def remove_doc(self, hash_id: str) -> bool:
+        """Remove a document."""
+        if "documents" not in self.config or hash_id not in self.config["documents"]:
+            print(f"Error: Document '{hash_id}' not found")
+            return False
+        
+        # Remove file
+        filename = f"{hash_id}.md"
+        file_path = self.content_dir / filename
+        if file_path.exists():
+            file_path.unlink()
+        
+        # Remove from config
+        name = self.config["documents"][hash_id].get("name") or hash_id
+        del self.config["documents"][hash_id]
+        self._save_config()
+        
+        print(f"Removed '{name}' ({hash_id})")
+        return True
+    
+    def export_package(self, package_name: str, format_type: str = 'toc', soft_links: bool = False) -> bool:
+        """Export documentation as a complete package."""
+        if "documents" not in self.config or not self.config["documents"]:
+            print("No documents available for export")
+            return True
+        
+        docs = self.config["documents"]
+        
+        # Create package directory
+        package_path = Path(package_name)
+        if package_path.exists():
+            print(f"Error: Directory '{package_name}' already exists")
+            return False
+        
+        try:
+            package_path.mkdir(parents=True)
+        except Exception as e:
+            print(f"Error creating directory '{package_name}': {e}")
+            return False
+        
+        # Determine main file name based on format
+        if format_type == 'toc':
+            main_file = 'index.md'
+        elif format_type == 'claude':
+            main_file = 'claude-refs.md'
+        elif format_type == 'json':
+            main_file = 'data.json'
+        else:
+            print(f"Unknown format: {format_type}")
+            return False
+        
+        # Generate main file content
+        if format_type == 'json':
+            # JSON is always self-contained
+            content = self._generate_json_format(docs, include_content=True)
+        else:
+            # TOC and Claude formats
+            if soft_links:
+                content = self._generate_format_with_absolute_paths(docs, format_type)
+            else:
+                content = self._generate_format_with_relative_paths(docs, format_type)
+                # Copy files when not using soft links
+                self._copy_files_to_package(docs, package_path)
+                # Copy config file to make it a functional localdocs project
+                self._copy_config_to_package(package_path)
+        
+        # Write main file
+        main_file_path = package_path / main_file
+        try:
+            with open(main_file_path, 'w') as f:
+                f.write(content)
+            
+            if soft_links and format_type != 'json':
+                print(f"Package '{package_name}' created with {main_file} (soft-links mode)")
+            else:
+                print(f"Package '{package_name}' created with {main_file}")
+            return True
+            
+        except Exception as e:
+            print(f"Error writing to {main_file_path}: {e}")
+            return False
+    
+    def _generate_format_with_relative_paths(self, docs: dict, format_type: str) -> str:
+        """Generate format with relative paths for package export."""
+        if format_type == 'toc':
+            lines = ["# Documentation Index", ""]
+            for hash_id, metadata in docs.items():
+                name = metadata.get("name") or f"Document {hash_id}"
+                description = metadata.get("description") or "No description"
+                filename = f"{hash_id}.md"
+                line = f"- [{name}]({filename}) - {description}"
+                lines.append(line)
+            return "\n".join(lines)
+        
+        elif format_type == 'claude':
+            lines = ["# Documentation References", ""]
+            for hash_id, metadata in docs.items():
+                name = metadata.get("name") or hash_id
+                description = metadata.get("description") or f"{name} documentation"
+                filename = f"{hash_id}.md"
+                ref_line = f"See @{filename} for {description}."
+                lines.append(ref_line)
+            return "\n".join(lines)
+    
+    def _generate_format_with_absolute_paths(self, docs: dict, format_type: str) -> str:
+        """Generate format with absolute paths for soft-links mode."""
+        if format_type == 'toc':
+            lines = ["# Documentation Index", ""]
+            for hash_id, metadata in docs.items():
+                name = metadata.get("name") or f"Document {hash_id}"
+                description = metadata.get("description") or "No description"
+                file_path = self.content_dir / f"{hash_id}.md"
+                abs_path = str(file_path.absolute())
+                line = f"- [{name}]({abs_path}) - {description}"
+                lines.append(line)
+            return "\n".join(lines)
+        
+        elif format_type == 'claude':
+            lines = ["# Documentation References", ""]
+            for hash_id, metadata in docs.items():
+                file_path = self.content_dir / f"{hash_id}.md"
+                name = metadata.get("name") or hash_id
+                description = metadata.get("description") or f"{name} documentation"
+                abs_path = str(file_path.absolute())
+                ref_line = f"See @{abs_path} for {description}."
+                lines.append(ref_line)
+            return "\n".join(lines)
+    
+    def _generate_json_format(self, docs: dict, include_content: bool = False) -> str:
+        """Generate JSON format export with optional content embedding."""
+        import json
+        
+        export_data = {
+            "documents": []
+        }
+        
+        for hash_id, metadata in docs.items():
+            doc_data = {
+                "id": hash_id,
+                "name": metadata.get("name"),
+                "description": metadata.get("description"),
+                "url": metadata.get("url"),
+                "file": f"{hash_id}.md"
+            }
+            
+            if include_content:
+                # Read and embed the actual content
+                file_path = self.content_dir / f"{hash_id}.md"
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        doc_data["content"] = f.read()
+                except Exception as e:
+                    doc_data["content"] = f"Error reading file: {e}"
+            
+            export_data["documents"].append(doc_data)
+        
+        return json.dumps(export_data, indent=2)
+    
+    def _copy_files_to_package(self, docs: dict, package_path: Path):
+        """Copy markdown files to package directory."""
+        import shutil
+        
+        for hash_id in docs.keys():
+            source_file = self.content_dir / f"{hash_id}.md"
+            dest_file = package_path / f"{hash_id}.md"
+            
+            if source_file.exists():
+                try:
+                    shutil.copy2(source_file, dest_file)
+                except Exception as e:
+                    print(f"Warning: Could not copy {hash_id}.md: {e}")
+    
+    def _copy_config_to_package(self, package_path: Path):
+        """Copy config file to make package a functional localdocs project."""
+        import shutil
+        
+        dest_config = package_path / "localdocs.config.json"
+        try:
+            shutil.copy2(self.config_path, dest_config)
+        except Exception as e:
+            print(f"Warning: Could not copy config file: {e}")
+
+
+def main():
+    """Main CLI entry point."""
+    try:
+        parser = argparse.ArgumentParser(description="LocalDocs - Simple documentation downloader")
+        subparsers = parser.add_subparsers(dest='command', help='Available commands')
+        
+        # Add command
+        add_parser = subparsers.add_parser('add', help='Download documents')
+        add_parser.add_argument('urls', nargs='*', help='URLs to download')
+        add_parser.add_argument('-f', '--from-file', help='Read URLs from file')
+        
+        # Set command
+        set_parser = subparsers.add_parser('set', help='Set document metadata')
+        set_parser.add_argument('hash_id', help='Document hash ID')
+        set_parser.add_argument('-n', '--name', help='Document name')
+        set_parser.add_argument('-d', '--description', help='Document description')
+        
+        # List command
+        list_parser = subparsers.add_parser('list', help='List all documents')
+        
+        # Update command
+        update_parser = subparsers.add_parser('update', help='Update documents')
+        update_parser.add_argument('hash_id', nargs='?', help='Specific document to update')
+        
+        # Remove command
+        remove_parser = subparsers.add_parser('remove', help='Remove document')
+        remove_parser.add_argument('hash_id', help='Document hash ID')
+        
+        # Export command
+        export_parser = subparsers.add_parser('export', help='Export documentation packages')
+        export_parser.add_argument('package_name', help='Package directory name')
+        export_parser.add_argument('--format', choices=['toc', 'claude', 'json'], 
+                                  default='toc', help='Export format (default: toc)')
+        export_parser.add_argument('--soft-links', action='store_true',
+                                  help='Use absolute paths without copying files')
+        
+        args = parser.parse_args()
+    
+        if not args.command:
+            parser.print_help()
+            sys.exit(1)
+        
+        # Initialize DocManager
+        manager = DocManager()
+        
+        # Route to appropriate method
+        if args.command == 'add':
+            if args.from_file:
+                manager.add_from_file(args.from_file)
+            elif args.urls:
+                manager.add_multiple(args.urls)
+            else:
+                manager.add_interactive()
+        elif args.command == 'set':
+            manager.set_metadata(args.hash_id, args.name, args.description)
+        elif args.command == 'list':
+            manager.list_docs()
+        elif args.command == 'update':
+            if args.hash_id:
+                manager.update_doc(args.hash_id)
+            else:
+                manager.update_all()
+        elif args.command == 'remove':
+            manager.remove_doc(args.hash_id)
+        elif args.command == 'export':
+            manager.export_package(args.package_name, args.format, args.soft_links)
+    
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

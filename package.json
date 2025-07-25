@@ -1,0 +1,37 @@
+{
+  "name": "localdocs",
+  "version": "0.0.1",
+  "description": "Local documentation manager with versioning, content tracking, and LLM integration support",
+  "author": "Jubal Mabaquiao <jubal.mabaquiao@gmail.com>",
+  "license": "MIT",
+  "bin": {
+    "localdocs": "./bin/localdocs"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "documentation",
+    "manager",
+    "versioning",
+    "cli",
+    "markdown",
+    "local",
+    "llm",
+    "knowledge-base"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jubalm/localdocs.git"
+  },
+  "homepage": "https://github.com/jubalm/localdocs#readme",
+  "bugs": {
+    "url": "https://github.com/jubalm/localdocs/issues"
+  },
+  "preferGlobal": false,
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
