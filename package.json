@@ -1,6 +1,6 @@
 {
   "name": "localdocs",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Local documentation manager with versioning, content tracking, and LLM integration support",
   "author": "Jubal Mabaquiao <jubal.mabaquiao@gmail.com>",
   "license": "MIT",

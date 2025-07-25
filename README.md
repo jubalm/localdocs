@@ -26,160 +26,13 @@ Your document collection becomes a part of your workflow. Update your sources an
 
 ## Example Use Cases
 
-### Context Engineering
+Here are some ways you could use LocalDocs:
 
-<details>
-<summary>Claude Code Custom Slash Commands</summary>
+- **Context Engineering** - Claude Code slash commands and LLM workflow optimization
+- **Team Collaboration** - Shared runbooks, onboarding docs, and automated wiki systems  
+- **Personal Knowledge Library** - Portable documentation collections that travel across projects
 
-## Build A Claude Code Slash Command Integration
-
-Add `/research` command by creating `./claude/commands/research.md` file with the following content:
-
-```yaml
----
-allowed-tools: Bash(npx github:jubalm/localdocs:*), Read
-description: Collect and organize documentation for context engineering
----
-
-# Goal
-Research documentation based on user query in $ARGUMENTS and add create a reference sheet for claude memory using LocalDocs
-
-Tool: LocalDocs (LD)
-Command: `npx github:jubalm/localdocs`
-
-Help Raw Output: 
-[[ INSERT `npx github:jubalm/localdocs --help` OUTPUT HERE ]]
-
-## Tasks
-ALWAYS: prefer LocalDocs over WebFecth to download documentation or references
-
-- [ ] Research and colled links from web search or known urls based on user query from $ARGUMENTS
-- [ ] Feed the links to LocalDocs through `add`. DON'T add extra parameters
-- [ ] Create meaningful names and descriptions to each entry in LocalDoc through `set`
-- [ ] Generate a reference document through LocalDocs `export ai_docs --format claude`
-```
-
-**Usage example:**
-```bash
-# In Claude Code
-/study https://docs.anthropic.com/claude/docs
-/study @react-docs-urls.txt
-
-# Result: Organized documentation ready for @file references
-# Export: claude-refs.md with clean @file paths
-```
-
-This workflow solves the common problem of scattered documentation research by creating organized, reusable knowledge collections.
-</details>
-
-### Team Collaboration
-
-<details>
-  <summary>Team Runbook / Internal Docs</summary>
-
-## Create A Team Runbook
-
-Collect scattered team documentation and create organized, shareable collections:
-
-```bash
-# Collect your team's docs
-npx github:jubalm/localdocs add https://api.yourcompany.com/docs
-npx github:jubalm/localdocs add https://github.com/yourteam/wiki/README.md
-npx github:jubalm/localdocs add https://internal-docs.com/deployment
-
-# Organize with meaningful names
-npx github:jubalm/localdocs set a1b2c3d4 -n "API Reference" -d "Company API documentation"
-npx github:jubalm/localdocs set e5f6g7h8 -n "Team Wiki" -d "Development guidelines"
-
-# Create shareable documentation package
-npx github:jubalm/localdocs export team-onboarding
-
-```
-
-Share the ouput `team-onboarding` folder, commit in codebase or create a wiki. New team members get organized, working documentation with functioning links.
-</details>
-
-<details>
-<summary>Programmable Documentation / Wiki Content</summary>
-
-## Automated Documentation Systems
-
-Transform collected documentation into structured data for wikis, sites, and automated workflows:
-
-```bash
-# Collect comprehensive documentation
-npx github:jubalm/localdocs add https://docs.react.dev/learn
-npx github:jubalm/localdocs add https://api.github.com/docs
-npx github:jubalm/localdocs add https://tailwindcss.com/docs
-
-# Organize with structured metadata
-npx github:jubalm/localdocs set a1b2c3d4 -n "React Guide" -d "Component-based UI development"
-npx github:jubalm/localdocs set e5f6g7h8 -n "GitHub API" -d "REST API reference and examples"
-npx github:jubalm/localdocs set x9y8z7w6 -n "Tailwind CSS" -d "Utility-first CSS framework"
-
-# Export as structured JSON
-npx github:jubalm/localdocs export tech-docs --format json
-```
-
-**Integration examples:**
-
-```javascript
-// Load and process documentation data
-const docsData = JSON.parse(fs.readFileSync('tech-docs/data.json'));
-
-// Import to Notion database
-await notion.databases.create({
-  title: doc.name,
-  content: doc.content,
-  tags: [doc.description]
-});
-
-// Generate static site pages
-docsData.documents.forEach(doc => {
-  generatePage(`/docs/${doc.name}`, doc.content);
-});
-
-// Update wiki automatically
-await wiki.updatePage(doc.name, {
-  content: doc.content,
-  lastUpdated: doc.updated_at
-});
-```
-
-**Result**: Programmatic documentation pipeline. Collect once, deploy everywhere. Perfect for automated wiki updates, site generation, and maintaining synchronized documentation across platforms.
-</details>
-
-### Personal Knowledge Library
-
-<details>
-<summary>Curated Documentation Collection</summary>
-
-## Build Your Portable Knowledge Base
-
-Create a personal documentation collection that travels with you across projects:
-
-```bash
-# Build your personal knowledge base
-npx github:jubalm/localdocs add https://docs.python.org/3/
-npx github:jubalm/localdocs add https://go.dev/doc/
-npx github:jubalm/localdocs add https://docs.rust-lang.org/book/
-npx github:jubalm/localdocs add https://developer.mozilla.org/en-US/docs/Web/JavaScript
-
-# Organize with personal metadata
-npx github:jubalm/localdocs set a1b2c3d4 -n "Python Docs" -d "My go-to Python reference"
-npx github:jubalm/localdocs set e5f6g7h8 -n "Go Guide" -d "Complete Go language guide"
-
-# Export for any project
-npx github:jubalm/localdocs export my-dev-refs --format claude
-npx github:jubalm/localdocs export portable-docs --format toc
-
-# Transfer to new machine/project
-cp -r my-dev-refs/ /path/to/new-project/docs/
-cp -r ~/.localdocs/ /path/to/backup/personal-knowledge/
-```
-
-**Result**: Portable personal knowledge base. Your curated documentation collection follows you across projects, machines, and workflows. No more re-researching the same topics.
-</details>
+For detailed examples, complete code samples, and implementation guides, see **[docs/use-cases.md](docs/use-cases.md)**.
 
 ## Getting Started
 
@@ -260,21 +113,15 @@ npx github:jubalm/localdocs export my-docs
 
 ## How It Works
 
-LocalDocs downloads documentation as clean markdown files with hash-based identifiers:
+LocalDocs uses hash-based storage to create collision-resistant documentation collections. URLs are converted to 8-character identifiers, content is stored as clean markdown files, and metadata is tracked separately.
 
-```
-~/.localdocs/
-  a1b2c3d4.md              # Clean markdown (no metadata pollution)
-  e5f6g7h8.md              # Perfect for LLM consumption
-  x9y8z7w6.md              # Hash-based collision-resistant names
-  localdocs.config.json    # Metadata and configuration
-```
+**Quick overview:**
+- SHA256 hash → 8-char filename (deterministic, collision-resistant)
+- Two-level config discovery (project → global fallback)  
+- Clean content storage (no frontmatter pollution)
+- Multiple export formats (TOC, Claude, JSON)
 
-**Hash-based storage**: Each URL gets a consistent 8-character identifier. Same URL always produces the same filename.
-
-**Clean content**: Files contain only original markdown content - no frontmatter or metadata pollution.
-
-**Flexible export**: Create organized collections with working relative links for any workflow.
+For detailed architecture, implementation details, and design decisions, see **[docs/how-it-works.md](docs/how-it-works.md)**.
 
 ## Requirements
 
