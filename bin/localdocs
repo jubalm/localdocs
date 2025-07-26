@@ -403,8 +403,8 @@ class DocManager:
         print(f"Removed '{name}' ({hash_id})")
         return True
     
-    def export_package(self, package_name: str, format_type: str = 'toc', soft_links: bool = False) -> bool:
-        """Export documentation as a complete package."""
+    def export_selected_package(self, package_name: str, include_docs: List[str], format_type: str = 'toc', soft_links: bool = False) -> bool:
+        """Export selected documents as a package."""
         if "documents" not in self.config or not self.config["documents"]:
             print("No documents available for export")
             return True
@@ -414,7 +414,23 @@ class DocManager:
             print(f"Error: Invalid package name '{package_name}'. Use only alphanumeric characters, hyphens, underscores, and dots.")
             return False
         
-        docs = self.config["documents"]
+        # Filter documents to only include specified IDs
+        all_docs = self.config["documents"]
+        docs = {}
+        missing_docs = []
+        
+        for doc_id in include_docs:
+            if doc_id in all_docs:
+                docs[doc_id] = all_docs[doc_id]
+            else:
+                missing_docs.append(doc_id)
+        
+        if missing_docs:
+            print(f"Warning: Documents not found: {', '.join(missing_docs)}")
+        
+        if not docs:
+            print("No valid documents to export")
+            return False
         
         # Create package directory
         package_path = Path(package_name)
@@ -451,8 +467,8 @@ class DocManager:
                 content = self._generate_format_with_relative_paths(docs, format_type)
                 # Copy files when not using soft links
                 self._copy_files_to_package(docs, package_path)
-                # Copy config file to make it a functional localdocs project
-                self._copy_config_to_package(package_path)
+                # Create config file with only the exported documents
+                self._create_filtered_config(docs, package_path)
         
         # Write main file
         main_file_path = package_path / main_file
@@ -469,6 +485,16 @@ class DocManager:
         except Exception as e:
             print(f"Error writing to {main_file_path}: {e}")
             return False
+    
+    def export_package(self, package_name: str, format_type: str = 'toc', soft_links: bool = False) -> bool:
+        """Export all documents as a package."""
+        if "documents" not in self.config or not self.config["documents"]:
+            print("No documents available for export")
+            return True
+        
+        # Export all documents by passing all document IDs
+        all_doc_ids = list(self.config["documents"].keys())
+        return self.export_selected_package(package_name, all_doc_ids, format_type, soft_links)
     
     def _generate_format_with_relative_paths(self, docs: dict, format_type: str) -> str:
         """Generate format with relative paths for package export."""
@@ -559,6 +585,20 @@ class DocManager:
                     shutil.copy2(source_file, dest_file)
                 except Exception as e:
                     print(f"Warning: Could not copy {hash_id}.md: {e}")
+    
+    def _create_filtered_config(self, docs: dict, package_path: Path) -> None:
+        """Create config file with only the exported documents."""
+        filtered_config = {
+            "storage_directory": ".",
+            "documents": docs
+        }
+        
+        dest_config = package_path / "localdocs.config.json"
+        try:
+            with open(dest_config, 'w') as f:
+                json.dump(filtered_config, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not create config file: {e}")
     
     def _copy_config_to_package(self, package_path: Path):
         """Copy config file to make package a functional localdocs project."""
@@ -959,23 +999,13 @@ class InteractiveManager:
         response = input(f"Create package '{package_name}'? [Y/n]: ").strip().lower()
         
         if response in ('', 'y', 'yes'):
-            # Create temporary manager with only selected documents
-            selected_docs = {hash_id: self.manager.config["documents"][hash_id] 
-                           for hash_id in self.selected}
-            
-            # Temporarily modify the config to export only selected documents
-            original_docs = self.manager.config["documents"]
-            self.manager.config["documents"] = selected_docs
-            
-            try:
-                success = self.manager.export_package(package_name, format_choice, False)
-                if success:
-                    self._show_message(f"Package '{package_name}' created successfully.")
-                else:
-                    self._show_message("Export failed.")
-            finally:
-                # Restore original config
-                self.manager.config["documents"] = original_docs
+            # Use the new selective export method
+            selected_doc_ids = list(self.selected)
+            success = self.manager.export_selected_package(package_name, selected_doc_ids, format_choice, False)
+            if success:
+                self._show_message(f"Package '{package_name}' created successfully.")
+            else:
+                self._show_message("Export failed.")
         else:
             self._show_message("Export cancelled.")
     
@@ -1113,6 +1143,8 @@ def main() -> None:
                                   default='toc', help='Export format (default: toc)')
         export_parser.add_argument('--soft-links', action='store_true',
                                   help='Use absolute paths without copying files')
+        export_parser.add_argument('--include', 
+                                  help='Comma-separated list of document IDs to include (default: all documents)')
         
         # Manage command
         manage_parser = subparsers.add_parser('manage', help='Interactive document manager')
@@ -1146,7 +1178,13 @@ def main() -> None:
         elif args.command == 'remove':
             manager.remove_doc(args.hash_id)
         elif args.command == 'export':
-            manager.export_package(args.package_name, args.format, args.soft_links)
+            if args.include:
+                # Parse comma-separated document IDs
+                include_docs = [doc_id.strip() for doc_id in args.include.split(',') if doc_id.strip()]
+                manager.export_selected_package(args.package_name, include_docs, args.format, args.soft_links)
+            else:
+                # Export all documents (existing behavior)
+                manager.export_package(args.package_name, args.format, args.soft_links)
         elif args.command == 'manage':
             interactive = InteractiveManager(manager)
             interactive.run()
