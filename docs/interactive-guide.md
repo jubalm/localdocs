@@ -1,17 +1,12 @@
 # Interactive Document Manager Guide
 
-The LocalDocs interactive manager provides a powerful terminal interface for managing your documentation collections when CLI commands aren't enough.
+<div align="center">
+<img src="https://github.com/user-attachments/assets/6fcace71-fab0-4991-babf-f617767d617d" alt="Interactive Manager Demo" width="600" />
+</div>
 
-## When to Use Interactive Mode
+The LocalDocs interactive manager provides a powerful terminal interface for managing your documentation collections when CLI commands aren't enough. It's especially useful for large collections documents, when you need bulk operations, selective exports, or want a visual overview of your documentation library.
 
-The interactive manager shines when you need:
-
-- **Visual overview** of your document collection
-- **Bulk operations** on multiple documents
-- **Selective exports** choosing specific documents
-- **Complex organization** with many documents
-
-## Getting Started
+## Interactive Mode Basics
 
 Launch the interactive manager from any directory with a LocalDocs collection:
 
@@ -36,11 +31,7 @@ The interactive manager's primary strength is **bulk operations**. Instead of ma
 2. **Batch Processing** - Apply operations to all selected documents at once
 3. **Safe Execution** - All destructive operations show confirmation prompts with document lists
 
-**Supported Bulk Operations:**
-- **Delete** - Remove multiple documents permanently
-- **Export** - Create packages with only selected documents  
-- **Update** - Re-download multiple documents from their URLs
-- **Metadata editing** - Set names and descriptions (single document)
+Supported operations: **Delete**, **Export**, **Update**, and **Metadata editing** (single document).
 
 This approach is especially powerful for large collections where CLI commands become cumbersome.
 
@@ -58,13 +49,7 @@ This approach is especially powerful for large collections where CLI commands be
 | s | Set metadata | Edit name/description of current document |
 | q | Quit | Shows confirmation if documents selected |
 
-## Best Practices
-
-**When to use interactive mode:**
-- Collections with 5+ documents
-- Need to organize or review your documentation library
-- Selective exports for different projects or teams
-- Bulk maintenance operations
+## Common Usage
 
 **Selection strategies:**
 - Use 'a' to select all, then deselect unwanted items with space
@@ -76,10 +61,5 @@ This approach is especially powerful for large collections where CLI commands be
 - Switch to interactive mode for complex organization
 - Return to CLI for automated workflows
 
-## Troubleshooting
-
-**Terminal compatibility:** Works on Unix/Linux/macOS terminals, Windows via WSL or modern terminal apps.
-
-**Performance:** Handles large collections (50+ documents) efficiently with real-time updates and minimal memory usage.
 
 The interactive manager transforms LocalDocs from a simple CLI tool into a comprehensive document management system while maintaining the lightweight, zero-config philosophy.
