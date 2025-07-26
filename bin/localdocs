@@ -9,13 +9,33 @@ import sys
 import hashlib
 import urllib.request
 import urllib.error
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
+from dataclasses import dataclass
 import argparse
+
+# Constants
+MIN_TERMINAL_WIDTH = 60
+DEFAULT_TERMINAL_WIDTH = 80
+MIN_SPACING = 4
+HORIZONTAL_PADDING = 4
+DOWNLOAD_TIMEOUT = 30
+VALIDATION_TIMEOUT = 10
+MAX_NAME_COLUMN_WIDTH = 40
+MIN_COLUMN_WIDTH = 8
+
+
+@dataclass
+class DocumentMetadata:
+    """Document metadata structure."""
+    url: str
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 # Terminal control utilities for interactive mode
-def get_char():
+def get_char() -> str:
     """Get single character input without pressing Enter."""
     try:
         # Unix/Linux/macOS
@@ -35,20 +55,58 @@ def get_char():
             return msvcrt.getch().decode('utf-8')
         except ImportError:
             # Ultimate fallback - regular input
-            return input("Press Enter after your choice: ")[0] if input("Press Enter after your choice: ") else ''
+            user_input = input("Press Enter after your choice: ")
+            return user_input[0] if user_input else ''
 
 
-def clear_screen():
+def clear_screen() -> None:
     """Clear the terminal screen using ANSI escape sequences."""
     print("\033[2J\033[H", end="")
 
 
-def is_interactive_capable():
+def is_interactive_capable() -> bool:
     """Check if terminal supports interactive features."""
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def find_config_path():
+def validate_package_name(package_name: str) -> bool:
+    """Validate package name for security."""
+    if not package_name or len(package_name) > 255:
+        return False
+    
+    # Disallow path traversal attempts
+    if '..' in package_name or package_name.startswith('/') or package_name.startswith('\\'):
+        return False
+    
+    # Only allow alphanumeric, hyphens, underscores, and dots
+    if not re.match(r'^[a-zA-Z0-9._-]+$', package_name):
+        return False
+    
+    # Disallow reserved names
+    reserved_names = {'con', 'prn', 'aux', 'nul', 'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9', 'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9'}
+    if package_name.lower() in reserved_names:
+        return False
+    
+    return True
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent directory traversal."""
+    # Remove path components and just keep the filename
+    filename = os.path.basename(filename)
+    
+    # Replace dangerous characters
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    
+    # Limit length
+    if len(filename) > 255:
+        name, ext = os.path.splitext(filename)
+        filename = name[:255-len(ext)] + ext
+    
+    return filename
+
+
+def find_config_path() -> Path:
     """Simple two-level config discovery"""
     
     # 1. Check current working directory
@@ -63,7 +121,7 @@ def find_config_path():
 class DocManager:
     """Simple documentation downloader with clean markdown output and metadata tracking."""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None):
         # Use auto-discovery if no path specified
         if config_path is None:
             self.config_path = find_config_path()
@@ -107,7 +165,7 @@ class DocManager:
                 "documents": {}
             }
     
-    def _save_config(self):
+    def _save_config(self) -> None:
         """Save config to disk."""
         with open(self.config_path, 'w') as f:
             json.dump(self.config, f, indent=2)
@@ -119,7 +177,8 @@ class DocManager:
     def _generate_filename(self, url: str) -> str:
         """Generate hash-based filename."""
         hash_id = self._generate_hash_id(url)
-        return f"{hash_id}.md"
+        filename = f"{hash_id}.md"
+        return sanitize_filename(filename)
     
     def _download_content(self, url: str) -> Optional[str]:
         """Download content from URL."""
@@ -128,10 +187,16 @@ class DocManager:
             request = urllib.request.Request(url, headers={
                 'User-Agent': 'Mozilla/5.0 (LocalDocs/1.0; Documentation Downloader)'
             })
-            with urllib.request.urlopen(request) as response:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
                 return response.read().decode('utf-8')
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            print(f"Network error downloading {url}: {e}")
+            return None
+        except UnicodeDecodeError as e:
+            print(f"Encoding error downloading {url}: {e}")
+            return None
         except Exception as e:
-            print(f"Error downloading {url}: {e}")
+            print(f"Unexpected error downloading {url}: {e}")
             return None
     
     def validate_url(self, url: str) -> bool:
@@ -139,9 +204,9 @@ class DocManager:
         try:
             urllib.request.urlopen(urllib.request.Request(url, headers={
                 'User-Agent': 'Mozilla/5.0 (LocalDocs/1.0; Documentation Downloader)'
-            }))
+            }), timeout=VALIDATION_TIMEOUT)
             return True
-        except:
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             return False
     
     def add_doc(self, url: str) -> Optional[str]:
@@ -182,7 +247,7 @@ class DocManager:
         print(f"✓ Downloaded as {hash_id}.md")
         return hash_id
     
-    def add_multiple(self, urls: List[str]):
+    def add_multiple(self, urls: List[str]) -> None:
         """Download multiple documents."""
         print(f"Downloading {len(urls)} documents...")
         
@@ -193,7 +258,7 @@ class DocManager:
         
         print(f"\nCompleted: {success_count}/{len(urls)} documents downloaded")
     
-    def add_from_file(self, file_path: str):
+    def add_from_file(self, file_path: str) -> None:
         """Download URLs from a file."""
         try:
             with open(file_path, 'r') as f:
@@ -207,7 +272,7 @@ class DocManager:
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
     
-    def add_interactive(self):
+    def add_interactive(self) -> None:
         """Interactive mode for adding URLs."""
         print("Enter URLs (one per line, empty line to finish):")
         urls = []
@@ -343,6 +408,11 @@ class DocManager:
         if "documents" not in self.config or not self.config["documents"]:
             print("No documents available for export")
             return True
+        
+        # Validate package name for security
+        if not validate_package_name(package_name):
+            print(f"Error: Invalid package name '{package_name}'. Use only alphanumeric characters, hyphens, underscores, and dots.")
+            return False
         
         docs = self.config["documents"]
         
@@ -504,14 +574,14 @@ class DocManager:
 class InteractiveManager:
     """Interactive terminal interface for managing documents."""
     
-    def __init__(self, doc_manager: DocManager):
+    def __init__(self, doc_manager: DocManager) -> None:
         self.manager = doc_manager
         self.selected = set()  # Set of selected document hash_ids
         self.current_index = 0  # Current cursor position
         self.docs_list = []  # Ordered list of (hash_id, metadata) tuples
         self.last_terminal_size = None  # Track terminal size changes
         
-    def run(self):
+    def run(self) -> bool:
         """Main interactive loop."""
         if not is_interactive_capable():
             print("Interactive mode requires a terminal that supports keyboard input.")
@@ -549,7 +619,7 @@ class InteractiveManager:
             
         return True
     
-    def _check_terminal_resize(self):
+    def _check_terminal_resize(self) -> bool:
         """Check if terminal has been resized and force re-render if needed."""
         try:
             import shutil
@@ -561,152 +631,136 @@ class InteractiveManager:
         except:
             return False
     
-    def _render_interface(self):
-        """Render the main interface."""
-        clear_screen()
-        
-        print("LocalDocs - Document Manager")
-        print("=" * 50)
-        print()
-        
-        # Get terminal width for layout decision
+    def _get_terminal_width(self) -> int:
+        """Get current terminal width with fallback."""
         try:
             import shutil
             width, _ = shutil.get_terminal_size()
+            return width
         except:
-            width = 80  # Fallback
-        
-        # Display documents with layout based on terminal width
-        if width < 60:
-            # Narrow terminal - use tree layout
-            for i, (hash_id, metadata) in enumerate(self.docs_list):
-                # Current document indicator
-                cursor = ">" if i == self.current_index else " "
-                
-                # Selection checkbox
-                checkbox = "[x]" if hash_id in self.selected else "[ ]"
-                
-                # Document info
-                name = metadata.get("name") or "[unnamed]"
-                description = metadata.get("description") or "[no description]"
-                
-                # Main line: cursor + checkbox + hash_id
-                print(f"{cursor} {checkbox} {hash_id}")
-                
-                # Tree branches: name and description with indentation
-                print(f"     ├─ {name}")
-                
-                # Handle long descriptions by wrapping
-                desc_width = width - 8  # Account for indentation "     └─ "
-                if len(description) <= desc_width:
-                    print(f"     └─ {description}")
-                else:
-                    # Wrap long descriptions
-                    words = description.split()
-                    current_line = ""
-                    first_line = True
-                    
-                    for word in words:
-                        if len(current_line + " " + word) <= desc_width:
-                            current_line += (" " + word) if current_line else word
-                        else:
-                            if current_line:
-                                if first_line:
-                                    print(f"     └─ {current_line}")
-                                    first_line = False
-                                else:
-                                    print(f"        {current_line}")  # Plain continuation, no tree chars
-                                current_line = word
-                    
-                    # Print final line (plain continuation if not first line)
-                    if current_line:
-                        if first_line:
-                            print(f"     └─ {current_line}")
-                        else:
-                            print(f"        {current_line}")  # Plain continuation
-                
-                # Add spacing between documents in tree mode
-                if i < len(self.docs_list) - 1:
-                    print()
-        else:
-            # Wide/medium terminal - use column layout
-            # Calculate column widths based on actual content
-            # Fixed parts: cursor (1) + space (1) + checkbox (3) + spaces between columns (3)
-            fixed_width = 8
-            id_width = 10  # Just wide enough for hash IDs + some padding
-            remaining_width = width - fixed_width - id_width
+            return DEFAULT_TERMINAL_WIDTH
+    
+    def _render_tree_layout(self, width: int) -> None:
+        """Render documents in tree layout for narrow terminals."""
+        for i, (hash_id, metadata) in enumerate(self.docs_list):
+            # Current document indicator
+            cursor = ">" if i == self.current_index else " "
             
-            if remaining_width > 20:  # Ensure minimum space
-                # Calculate the longest name to optimize column sizing
-                max_name_length = 0
-                for _, metadata in self.docs_list:
-                    name = metadata.get("name") or "[unnamed]"
-                    max_name_length = max(max_name_length, len(name))
-                
-                # Size name column to fit longest name + small buffer, but with reasonable limits
-                name_width = min(max_name_length + 2, remaining_width // 2, 40)  # Cap at 40 chars max
-                name_width = max(name_width, 10)  # Minimum 10 chars
-                desc_width = max(10, remaining_width - name_width)
+            # Selection checkbox
+            checkbox = "[x]" if hash_id in self.selected else "[ ]"
+            
+            # Document info
+            name = metadata.get("name") or "[unnamed]"
+            description = metadata.get("description") or "[no description]"
+            
+            # Main line: cursor + checkbox + hash_id
+            print(f"{cursor} {checkbox} {hash_id}")
+            
+            # Tree branches: name and description with indentation
+            print(f"     ├─ {name}")
+            
+            # Handle long descriptions by wrapping
+            desc_width = width - 8  # Account for indentation "     └─ "
+            if len(description) <= desc_width:
+                print(f"     └─ {description}")
             else:
-                # Very narrow terminal - minimal widths
-                name_width = 8
-                desc_width = max(8, remaining_width - name_width)
+                # Wrap long descriptions
+                words = description.split()
+                current_line = ""
+                first_line = True
+                
+                for word in words:
+                    if len(current_line + " " + word) <= desc_width:
+                        current_line += (" " + word) if current_line else word
+                    else:
+                        if current_line:
+                            if first_line:
+                                print(f"     └─ {current_line}")
+                                first_line = False
+                            else:
+                                print(f"        {current_line}")  # Plain continuation, no tree chars
+                            current_line = word
+                
+                # Print final line (plain continuation if not first line)
+                if current_line:
+                    if first_line:
+                        print(f"     └─ {current_line}")
+                    else:
+                        print(f"        {current_line}")  # Plain continuation
             
-            # Display documents in columns
-            for i, (hash_id, metadata) in enumerate(self.docs_list):
-                # Current document indicator
-                cursor = ">" if i == self.current_index else " "
-                
-                # Selection checkbox
-                checkbox = "[x]" if hash_id in self.selected else "[ ]"
-                
-                # Document info
+            # Add spacing between documents in tree mode
+            if i < len(self.docs_list) - 1:
+                print()
+    
+    def _render_column_layout(self, width: int) -> None:
+        """Render documents in column layout for wide terminals."""
+        # Calculate column widths based on actual content
+        # Fixed parts: cursor (1) + space (1) + checkbox (3) + spaces between columns (3)
+        fixed_width = 8
+        id_width = 10  # Just wide enough for hash IDs + some padding
+        remaining_width = width - fixed_width - id_width
+        
+        if remaining_width > 20:  # Ensure minimum space
+            # Calculate the longest name to optimize column sizing
+            max_name_length = 0
+            for _, metadata in self.docs_list:
                 name = metadata.get("name") or "[unnamed]"
-                description = metadata.get("description") or "[no description]"
+                max_name_length = max(max_name_length, len(name))
+            
+            # Size name column to fit longest name + small buffer, but with reasonable limits
+            name_width = min(max_name_length + 2, remaining_width // 2, MAX_NAME_COLUMN_WIDTH)
+            name_width = max(name_width, MIN_COLUMN_WIDTH + 2)
+            desc_width = max(MIN_COLUMN_WIDTH + 2, remaining_width - name_width)
+        else:
+            # Very narrow terminal - minimal widths
+            name_width = MIN_COLUMN_WIDTH
+            desc_width = max(MIN_COLUMN_WIDTH, remaining_width - name_width)
+        
+        # Display documents in columns
+        for i, (hash_id, metadata) in enumerate(self.docs_list):
+            # Current document indicator
+            cursor = ">" if i == self.current_index else " "
+            
+            # Selection checkbox
+            checkbox = "[x]" if hash_id in self.selected else "[ ]"
+            
+            # Document info
+            name = metadata.get("name") or "[unnamed]"
+            description = metadata.get("description") or "[no description]"
+            
+            # Truncate to fit calculated widths
+            if len(name) > name_width:
+                name = name[:name_width-3] + "..."
+            if len(description) > desc_width:
+                description = description[:desc_width-3] + "..."
                 
-                # Truncate to fit calculated widths
-                if len(name) > name_width:
-                    name = name[:name_width-3] + "..."
-                if len(description) > desc_width:
-                    description = description[:desc_width-3] + "..."
-                    
-                print(f"{cursor} {checkbox} {hash_id:<{id_width}} {name:<{name_width}} {description}")
+            print(f"{cursor} {checkbox} {hash_id:<{id_width}} {name:<{name_width}} {description}")
+    
+    def _build_centered_line(self, items: List[str], available_width: int) -> str:
+        """Build a line of controls using centered cells."""
+        if not items:
+            return ""
         
-        # Status and controls
-        print()
-        print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents")
-        print()
-        # Get terminal width for responsive layout
-        try:
-            import shutil
-            width, _ = shutil.get_terminal_size()
-        except:
-            width = 80  # Fallback default
+        num_cols = len(items)
+        col_width = available_width // num_cols
         
-        # Consistent centered cells layout for all widths
-        def build_centered_line(items, available_width):
-            """Build a line of controls using centered cells."""
-            if not items:
-                return ""
-            
-            num_cols = len(items)
-            col_width = available_width // num_cols
-            
-            # Build centered columns
-            result = ""
-            for item in items:
-                padding = (col_width - len(item)) // 2
-                cell = " " * padding + item + " " * (col_width - padding - len(item))
-                result += cell
-            
-            return result
+        # Build centered columns using list comprehension
+        cells = []
+        for item in items:
+            padding = (col_width - len(item)) // 2
+            cell = f"{' ' * padding}{item}{' ' * (col_width - padding - len(item))}"
+            cells.append(cell)
         
+        return ''.join(cells)
+    
+    def _render_controls(self, width: int) -> None:
+        """Render control instructions at bottom of interface."""
         # Try extended labels first, then shorthand if needed
         extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[d] Delete", "[x] Export", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
         shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[d] Delete", "[x] Export", "[u] Update", "[s] Set", "[q] Quit"]
         
-        min_spacing = 4  # Comfortable spacing between controls
-        horizontal_padding = 4  # 2 spaces on each side for breathing room
+        min_spacing = MIN_SPACING  # Comfortable spacing between controls
+        horizontal_padding = HORIZONTAL_PADDING  # 2 spaces on each side for breathing room
         
         # Try extended labels first
         total_content = sum(len(control) for control in extended_controls)
@@ -746,8 +800,32 @@ class InteractiveManager:
             # Use simple 2-column centered layout with shorthand labels
             line1 = controls[:4]  # First 4 controls
             line2 = controls[4:]  # Last 4 controls
-            print(build_centered_line(line1, width))
-            print(build_centered_line(line2, width))
+            print(self._build_centered_line(line1, width))
+            print(self._build_centered_line(line2, width))
+    
+    def _render_interface(self) -> None:
+        """Render the main interface."""
+        clear_screen()
+        
+        print("LocalDocs - Document Manager")
+        print("=" * 50)
+        print()
+        
+        # Get terminal width for layout decision
+        width = self._get_terminal_width()
+        
+        # Display documents with layout based on terminal width
+        if width < MIN_TERMINAL_WIDTH:
+            self._render_tree_layout(width)
+        else:
+            self._render_column_layout(width)
+        
+        # Status and controls
+        print()
+        print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents")
+        print()
+        
+        self._render_controls(width)
     
     def _handle_key(self, key: str) -> bool:
         """Handle keyboard input. Returns False to quit."""
@@ -809,7 +887,7 @@ class InteractiveManager:
         
         return True
     
-    def _handle_delete(self):
+    def _handle_delete(self) -> None:
         """Handle delete operation with confirmation."""
         if not self.selected:
             self._show_message("No documents selected for deletion.")
@@ -848,7 +926,7 @@ class InteractiveManager:
         else:
             self._show_message("Deletion cancelled.")
     
-    def _handle_export(self):
+    def _handle_export(self) -> None:
         """Handle export operation with confirmation."""
         if not self.selected:
             self._show_message("No documents selected for export.")
@@ -868,6 +946,10 @@ class InteractiveManager:
         package_name = input("Package name: ").strip()
         if not package_name:
             self._show_message("Export cancelled - no package name provided.")
+            return
+        
+        if not validate_package_name(package_name):
+            self._show_message("Export cancelled - invalid package name. Use only alphanumeric characters, hyphens, underscores, and dots.")
             return
             
         format_choice = input("Format [toc/claude/json] (default: toc): ").strip().lower()
@@ -897,7 +979,7 @@ class InteractiveManager:
         else:
             self._show_message("Export cancelled.")
     
-    def _handle_update(self):
+    def _handle_update(self) -> None:
         """Handle update operation with confirmation."""
         if not self.selected:
             self._show_message("No documents selected for update.")
@@ -927,7 +1009,7 @@ class InteractiveManager:
         else:
             self._show_message("Update cancelled.")
     
-    def _handle_set_metadata(self):
+    def _handle_set_metadata(self) -> None:
         """Handle setting metadata for current document."""
         if not self.docs_list:
             return
@@ -987,7 +1069,7 @@ class InteractiveManager:
                 return True  # Stay in manager
             # Ignore all other keys and stay in confirmation
     
-    def _show_message(self, message: str):
+    def _show_message(self, message: str) -> None:
         """Show a message and wait for keypress."""
         clear_screen()
         print(message)
@@ -996,7 +1078,7 @@ class InteractiveManager:
         get_char()
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     try:
         parser = argparse.ArgumentParser(description="LocalDocs - Simple documentation downloader")
