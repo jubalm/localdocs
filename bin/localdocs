@@ -14,6 +14,40 @@ from typing import Dict, List, Optional
 import argparse
 
 
+# Terminal control utilities for interactive mode
+def get_char():
+    """Get single character input without pressing Enter."""
+    try:
+        # Unix/Linux/macOS
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            char = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return char
+    except ImportError:
+        # Windows fallback - use msvcrt if available
+        try:
+            import msvcrt
+            return msvcrt.getch().decode('utf-8')
+        except ImportError:
+            # Ultimate fallback - regular input
+            return input("Press Enter after your choice: ")[0] if input("Press Enter after your choice: ") else ''
+
+
+def clear_screen():
+    """Clear the terminal screen using ANSI escape sequences."""
+    print("\033[2J\033[H", end="")
+
+
+def is_interactive_capable():
+    """Check if terminal supports interactive features."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def find_config_path():
     """Simple two-level config discovery"""
     
@@ -467,6 +501,501 @@ class DocManager:
             print(f"Warning: Could not copy config file: {e}")
 
 
+class InteractiveManager:
+    """Interactive terminal interface for managing documents."""
+    
+    def __init__(self, doc_manager: DocManager):
+        self.manager = doc_manager
+        self.selected = set()  # Set of selected document hash_ids
+        self.current_index = 0  # Current cursor position
+        self.docs_list = []  # Ordered list of (hash_id, metadata) tuples
+        self.last_terminal_size = None  # Track terminal size changes
+        
+    def run(self):
+        """Main interactive loop."""
+        if not is_interactive_capable():
+            print("Interactive mode requires a terminal that supports keyboard input.")
+            print("Use regular CLI commands instead:")
+            print("  localdocs list    - Show all documents")
+            print("  localdocs export  - Export documents")
+            print("  localdocs remove  - Remove a document")
+            return False
+            
+        # Load documents
+        if "documents" not in self.manager.config or not self.manager.config["documents"]:
+            print("No documents found. Use 'localdocs add <url>' to add documents first.")
+            return True
+            
+        self.docs_list = list(self.manager.config["documents"].items())
+        self.current_index = 0
+        self.selected = set()
+        
+        try:
+            # Initial render
+            self._render_interface()
+            
+            while True:
+                key = get_char()
+                
+                if not self._handle_key(key):
+                    break  # User chose to quit
+                    
+                # Re-render after key action (checks for resize automatically)
+                self._render_interface()
+                    
+        except KeyboardInterrupt:
+            clear_screen()
+            print("Interactive mode cancelled.")
+            
+        return True
+    
+    def _check_terminal_resize(self):
+        """Check if terminal has been resized and force re-render if needed."""
+        try:
+            import shutil
+            current_size = shutil.get_terminal_size()
+            if self.last_terminal_size != current_size:
+                self.last_terminal_size = current_size
+                return True  # Size changed
+            return False  # No change
+        except:
+            return False
+    
+    def _render_interface(self):
+        """Render the main interface."""
+        clear_screen()
+        
+        print("LocalDocs - Document Manager")
+        print("=" * 50)
+        print()
+        
+        # Get terminal width for layout decision
+        try:
+            import shutil
+            width, _ = shutil.get_terminal_size()
+        except:
+            width = 80  # Fallback
+        
+        # Display documents with layout based on terminal width
+        if width < 60:
+            # Narrow terminal - use tree layout
+            for i, (hash_id, metadata) in enumerate(self.docs_list):
+                # Current document indicator
+                cursor = ">" if i == self.current_index else " "
+                
+                # Selection checkbox
+                checkbox = "[x]" if hash_id in self.selected else "[ ]"
+                
+                # Document info
+                name = metadata.get("name") or "[unnamed]"
+                description = metadata.get("description") or "[no description]"
+                
+                # Main line: cursor + checkbox + hash_id
+                print(f"{cursor} {checkbox} {hash_id}")
+                
+                # Tree branches: name and description with indentation
+                print(f"     ├─ {name}")
+                
+                # Handle long descriptions by wrapping
+                desc_width = width - 8  # Account for indentation "     └─ "
+                if len(description) <= desc_width:
+                    print(f"     └─ {description}")
+                else:
+                    # Wrap long descriptions
+                    words = description.split()
+                    current_line = ""
+                    first_line = True
+                    
+                    for word in words:
+                        if len(current_line + " " + word) <= desc_width:
+                            current_line += (" " + word) if current_line else word
+                        else:
+                            if current_line:
+                                if first_line:
+                                    print(f"     └─ {current_line}")
+                                    first_line = False
+                                else:
+                                    print(f"        {current_line}")  # Plain continuation, no tree chars
+                                current_line = word
+                    
+                    # Print final line (plain continuation if not first line)
+                    if current_line:
+                        if first_line:
+                            print(f"     └─ {current_line}")
+                        else:
+                            print(f"        {current_line}")  # Plain continuation
+                
+                # Add spacing between documents in tree mode
+                if i < len(self.docs_list) - 1:
+                    print()
+        else:
+            # Wide/medium terminal - use column layout
+            # Calculate column widths based on actual content
+            # Fixed parts: cursor (1) + space (1) + checkbox (3) + spaces between columns (3)
+            fixed_width = 8
+            id_width = 10  # Just wide enough for hash IDs + some padding
+            remaining_width = width - fixed_width - id_width
+            
+            if remaining_width > 20:  # Ensure minimum space
+                # Calculate the longest name to optimize column sizing
+                max_name_length = 0
+                for _, metadata in self.docs_list:
+                    name = metadata.get("name") or "[unnamed]"
+                    max_name_length = max(max_name_length, len(name))
+                
+                # Size name column to fit longest name + small buffer, but with reasonable limits
+                name_width = min(max_name_length + 2, remaining_width // 2, 40)  # Cap at 40 chars max
+                name_width = max(name_width, 10)  # Minimum 10 chars
+                desc_width = max(10, remaining_width - name_width)
+            else:
+                # Very narrow terminal - minimal widths
+                name_width = 8
+                desc_width = max(8, remaining_width - name_width)
+            
+            # Display documents in columns
+            for i, (hash_id, metadata) in enumerate(self.docs_list):
+                # Current document indicator
+                cursor = ">" if i == self.current_index else " "
+                
+                # Selection checkbox
+                checkbox = "[x]" if hash_id in self.selected else "[ ]"
+                
+                # Document info
+                name = metadata.get("name") or "[unnamed]"
+                description = metadata.get("description") or "[no description]"
+                
+                # Truncate to fit calculated widths
+                if len(name) > name_width:
+                    name = name[:name_width-3] + "..."
+                if len(description) > desc_width:
+                    description = description[:desc_width-3] + "..."
+                    
+                print(f"{cursor} {checkbox} {hash_id:<{id_width}} {name:<{name_width}} {description}")
+        
+        # Status and controls
+        print()
+        print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents")
+        print()
+        # Get terminal width for responsive layout
+        try:
+            import shutil
+            width, _ = shutil.get_terminal_size()
+        except:
+            width = 80  # Fallback default
+        
+        # Consistent centered cells layout for all widths
+        def build_centered_line(items, available_width):
+            """Build a line of controls using centered cells."""
+            if not items:
+                return ""
+            
+            num_cols = len(items)
+            col_width = available_width // num_cols
+            
+            # Build centered columns
+            result = ""
+            for item in items:
+                padding = (col_width - len(item)) // 2
+                cell = " " * padding + item + " " * (col_width - padding - len(item))
+                result += cell
+            
+            return result
+        
+        # Try extended labels first, then shorthand if needed
+        extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[d] Delete", "[x] Export", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
+        shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[d] Delete", "[x] Export", "[u] Update", "[s] Set", "[q] Quit"]
+        
+        min_spacing = 4  # Comfortable spacing between controls
+        horizontal_padding = 4  # 2 spaces on each side for breathing room
+        
+        # Try extended labels first
+        total_content = sum(len(control) for control in extended_controls)
+        required_width = total_content + (len(extended_controls) - 1) * min_spacing + horizontal_padding
+        
+        if required_width <= width:
+            # Extended labels fit - use them with natural spacing
+            controls = extended_controls
+        else:
+            # Try shorthand labels
+            total_content = sum(len(control) for control in shorthand_controls)
+            required_width = total_content + (len(shorthand_controls) - 1) * min_spacing + horizontal_padding
+            
+            if required_width <= width:
+                # Shorthand labels fit - use them with natural spacing
+                controls = shorthand_controls
+            else:
+                # Neither fit naturally - use shorthand with columns
+                controls = shorthand_controls
+                # Fall through to column layout
+        
+        # Now render with the chosen labels
+        if required_width <= width:
+            # Controls fit on one line - use natural even spacing with padding
+            available_space = width - sum(len(c) for c in controls) - horizontal_padding
+            spaces_between = available_space // (len(controls) - 1) if len(controls) > 1 else 0
+            spaces_between = max(spaces_between, min_spacing)
+            
+            line = "  "  # Left padding
+            for i, control in enumerate(controls):
+                line += control
+                if i < len(controls) - 1:  # Not the last control
+                    line += " " * spaces_between
+            line += "  "  # Right padding
+            print(line)
+        else:
+            # Use simple 2-column centered layout with shorthand labels
+            line1 = controls[:4]  # First 4 controls
+            line2 = controls[4:]  # Last 4 controls
+            print(build_centered_line(line1, width))
+            print(build_centered_line(line2, width))
+    
+    def _handle_key(self, key: str) -> bool:
+        """Handle keyboard input. Returns False to quit."""
+        if key in ('q', 'Q'):  # q, Q - show quit confirmation
+            return self._handle_quit_confirmation()  # True = stay, False = quit
+            
+        elif key in ('j',):  # j - down
+            if self.docs_list and self.current_index < len(self.docs_list) - 1:
+                self.current_index += 1
+            
+        elif key in ('k',):  # k - up
+            if self.docs_list and self.current_index > 0:
+                self.current_index -= 1
+            
+        elif key == '\x1b':  # Escape - arrow key sequence
+            # Read the full arrow key sequence
+            try:
+                next_char = get_char()
+                if next_char == '[':
+                    arrow_key = get_char()
+                    if arrow_key == 'A' and self.docs_list and self.current_index > 0:  # Up arrow
+                        self.current_index -= 1
+                    elif arrow_key == 'B' and self.docs_list and self.current_index < len(self.docs_list) - 1:  # Down arrow
+                        self.current_index += 1
+                    # Ignore other arrow keys (left/right C/D)
+                # If it's not a [ sequence, just ignore
+            except:
+                # Error reading sequence - ignore
+                pass
+            
+        elif key == ' ':  # Space - toggle current selection
+            if self.docs_list:
+                current_hash_id = self.docs_list[self.current_index][0]
+                if current_hash_id in self.selected:
+                    self.selected.remove(current_hash_id)
+                else:
+                    self.selected.add(current_hash_id)
+                    
+        elif key in ('a', 'A'):  # Smart select/deselect all
+            all_hash_ids = {hash_id for hash_id, _ in self.docs_list}
+            if len(self.selected) == len(all_hash_ids):
+                # All selected - deselect all
+                self.selected.clear()
+            else:
+                # Some or none selected - select all
+                self.selected = all_hash_ids.copy()
+                
+        elif key in ('d', 'D'):  # Delete selected
+            self._handle_delete()
+            
+        elif key in ('x', 'X'):  # Export selected
+            self._handle_export()
+            
+        elif key in ('u', 'U'):  # Update selected
+            self._handle_update()
+            
+        elif key in ('s', 'S'):  # Set metadata for current
+            self._handle_set_metadata()
+        
+        return True
+    
+    def _handle_delete(self):
+        """Handle delete operation with confirmation."""
+        if not self.selected:
+            self._show_message("No documents selected for deletion.")
+            return
+            
+        clear_screen()
+        print("Delete the following documents?")
+        print()
+        
+        # Show what will be deleted
+        for hash_id in self.selected:
+            metadata = self.manager.config["documents"][hash_id]
+            name = metadata.get("name") or "[unnamed]"
+            print(f"- {hash_id} ({name})")
+        
+        print()
+        print("This cannot be undone.")
+        response = input("Continue? [y/N]: ").strip().lower()
+        
+        if response in ('y', 'yes'):
+            # Perform deletions
+            deleted_count = 0
+            for hash_id in list(self.selected):  # Copy to avoid modification during iteration
+                if self.manager.remove_doc(hash_id):
+                    deleted_count += 1
+            
+            # Refresh docs list and clear selection
+            self.docs_list = list(self.manager.config["documents"].items())
+            self.selected.clear()
+            if self.docs_list:
+                self.current_index = min(self.current_index, len(self.docs_list) - 1)
+            else:
+                self.current_index = 0
+            
+            self._show_message(f"Deleted {deleted_count} documents.")
+        else:
+            self._show_message("Deletion cancelled.")
+    
+    def _handle_export(self):
+        """Handle export operation with confirmation."""
+        if not self.selected:
+            self._show_message("No documents selected for export.")
+            return
+            
+        clear_screen()
+        print("Export the following documents?")
+        print()
+        
+        # Show what will be exported
+        for hash_id in self.selected:
+            metadata = self.manager.config["documents"][hash_id]
+            name = metadata.get("name") or "[unnamed]"
+            print(f"- {hash_id} ({name})")
+        
+        print()
+        package_name = input("Package name: ").strip()
+        if not package_name:
+            self._show_message("Export cancelled - no package name provided.")
+            return
+            
+        format_choice = input("Format [toc/claude/json] (default: toc): ").strip().lower()
+        if format_choice not in ('toc', 'claude', 'json'):
+            format_choice = 'toc'
+            
+        response = input(f"Create package '{package_name}'? [Y/n]: ").strip().lower()
+        
+        if response in ('', 'y', 'yes'):
+            # Create temporary manager with only selected documents
+            selected_docs = {hash_id: self.manager.config["documents"][hash_id] 
+                           for hash_id in self.selected}
+            
+            # Temporarily modify the config to export only selected documents
+            original_docs = self.manager.config["documents"]
+            self.manager.config["documents"] = selected_docs
+            
+            try:
+                success = self.manager.export_package(package_name, format_choice, False)
+                if success:
+                    self._show_message(f"Package '{package_name}' created successfully.")
+                else:
+                    self._show_message("Export failed.")
+            finally:
+                # Restore original config
+                self.manager.config["documents"] = original_docs
+        else:
+            self._show_message("Export cancelled.")
+    
+    def _handle_update(self):
+        """Handle update operation with confirmation."""
+        if not self.selected:
+            self._show_message("No documents selected for update.")
+            return
+            
+        clear_screen()
+        print("Update the following documents from their URLs?")
+        print()
+        
+        # Show what will be updated
+        for hash_id in self.selected:
+            metadata = self.manager.config["documents"][hash_id]
+            name = metadata.get("name") or "[unnamed]"
+            print(f"- {hash_id} ({name})")
+        
+        print()
+        print("This will re-download content from the original URLs.")
+        response = input("Continue? [Y/n]: ").strip().lower()
+        
+        if response in ('', 'y', 'yes'):
+            updated_count = 0
+            for hash_id in self.selected:
+                if self.manager.update_doc(hash_id):
+                    updated_count += 1
+            
+            self._show_message(f"Updated {updated_count}/{len(self.selected)} documents.")
+        else:
+            self._show_message("Update cancelled.")
+    
+    def _handle_set_metadata(self):
+        """Handle setting metadata for current document."""
+        if not self.docs_list:
+            return
+            
+        current_hash_id = self.docs_list[self.current_index][0]
+        metadata = self.manager.config["documents"][current_hash_id]
+        
+        clear_screen()
+        print(f"Edit metadata for {current_hash_id}:")
+        print()
+        
+        # Get current values
+        current_name = metadata.get("name") or ""
+        current_desc = metadata.get("description") or ""
+        
+        # Prompt for new values
+        print(f"Name (current: {current_name or '[unnamed]'}): ", end="")
+        new_name = input().strip()
+        
+        print(f"Description (current: {current_desc or '[no description]'}): ", end="")
+        new_description = input().strip()
+        
+        # Use current values if nothing entered
+        if not new_name:
+            new_name = current_name
+        if not new_description:
+            new_description = current_desc
+            
+        # Update metadata
+        self.manager.set_metadata(current_hash_id, 
+                                new_name if new_name != current_name else None,
+                                new_description if new_description != current_desc else None)
+        
+        # Refresh docs list
+        self.docs_list = list(self.manager.config["documents"].items())
+        
+        self._show_message(f"Updated metadata for {current_hash_id}.")
+    
+    def _handle_quit_confirmation(self) -> bool:
+        """Handle quit confirmation. Returns False to quit, True to stay."""
+        clear_screen()
+        
+        # Show context-aware message
+        if self.selected:
+            print(f"You have {len(self.selected)} document{'s' if len(self.selected) != 1 else ''} selected.")
+        
+        print("Exit interactive manager?")
+        print()
+        print("[y] Yes, exit    [n] No, stay")
+        
+        while True:
+            key = get_char().lower()
+            
+            if key == 'y':
+                return False  # Quit the manager
+            elif key == 'n':
+                return True  # Stay in manager
+            # Ignore all other keys and stay in confirmation
+    
+    def _show_message(self, message: str):
+        """Show a message and wait for keypress."""
+        clear_screen()
+        print(message)
+        print()
+        print("Press any key to continue...")
+        get_char()
+
+
 def main():
     """Main CLI entry point."""
     try:
@@ -503,6 +1032,9 @@ def main():
         export_parser.add_argument('--soft-links', action='store_true',
                                   help='Use absolute paths without copying files')
         
+        # Manage command
+        manage_parser = subparsers.add_parser('manage', help='Interactive document manager')
+        
         args = parser.parse_args()
     
         if not args.command:
@@ -533,6 +1065,9 @@ def main():
             manager.remove_doc(args.hash_id)
         elif args.command == 'export':
             manager.export_package(args.package_name, args.format, args.soft_links)
+        elif args.command == 'manage':
+            interactive = InteractiveManager(manager)
+            interactive.run()
     
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
