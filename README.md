@@ -71,6 +71,10 @@ npx github:jubalm/localdocs export my-docs
 npx github:jubalm/localdocs export claude-context --format claude
 # Creates: claude-context/claude-refs.md with @file references
 
+# Selective export (specific documents only)
+npx github:jubalm/localdocs export team-docs --include a1b2c3d4,e5f6g7h8 --format claude
+# Creates: team-docs/ with only the specified documents
+
 # Data export
 npx github:jubalm/localdocs export backup --format json
 # Creates: backup/data.json with embedded content
@@ -131,7 +135,7 @@ npx github:jubalm/localdocs manage
 | `set <hash> [-n name] [-d desc]` | Add metadata | `set a1b2c3d4 -n "Guide"` |
 | `update [hash]` | Re-download documents | `update` or `update a1b2c3d4` |
 | `remove <hash>` | Delete document | `remove a1b2c3d4` |
-| `export <name> [--format] [--soft-links]` | Create organized collections | `export my-docs --format claude` |
+| `export <name> [--format] [--soft-links] [--include]` | Create organized collections | `export my-docs --format claude --include a1b2c3d4,e5f6g7h8` |
 | `manage` | Interactive document manager | `manage` - for bulk operations and visual selection |
 
 ## How It Works
