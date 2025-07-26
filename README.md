@@ -1,6 +1,6 @@
 # LocalDocs - Documentation That Works With Your Tools
 
-Simple tool for collecting documentation locally and exporting organized collections for any workflow. **Research once, export everywhere, update whenever**.
+Lightweight documentation manager for collecting sources locally and exporting organized collections for any workflow. **Research once, export everywhere, update whenever** - with interactive management when you need it.
 
 ## In A Nutshell
 
@@ -92,6 +92,28 @@ npx github:jubalm/localdocs update
 npx github:jubalm/localdocs export my-docs
 ```
 
+## Advanced Usage
+
+### Interactive Document Manager
+
+When your collection grows or you need bulk operations, use the interactive manager:
+
+```bash
+npx github:jubalm/localdocs manage
+```
+
+**Key Features:**
+- **Visual selection** - Navigate with j/k, select with space, toggle all with 'a'
+- **Bulk operations** - Delete, export, or update multiple documents at once
+
+**When to use interactive mode:**
+- Organizing large document collections
+- Selective exports (choose specific documents)
+- Bulk updates or deletions
+- Visual review of your documentation library
+
+> **Getting started tip:** Try adding a few documents first, then run `manage` to experience the interactive interface with your actual collection.
+
 ## Export Formats
 
 | Format | Output File | Contents | Use Case |
@@ -110,6 +132,7 @@ npx github:jubalm/localdocs export my-docs
 | `update [hash]` | Re-download documents | `update` or `update a1b2c3d4` |
 | `remove <hash>` | Delete document | `remove a1b2c3d4` |
 | `export <name> [--format] [--soft-links]` | Create organized collections | `export my-docs --format claude` |
+| `manage` | Interactive document manager | `manage` - for bulk operations and visual selection |
 
 ## How It Works
 
