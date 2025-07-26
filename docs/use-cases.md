@@ -59,6 +59,16 @@ ALWAYS: prefer LocalDocs over WebFecth to download documentation or references
 
 This workflow solves the common problem of scattered documentation research by creating organized, reusable knowledge collections. Instead of repeatedly using WebFetch for the same documentation, you build a curated collection that travels with your projects.
 
+**Interactive Enhancement:**
+When your research collection grows, use the interactive manager for visual organization:
+
+```bash
+# After collecting multiple documentation sources
+npx github:jubalm/localdocs manage
+# Visually select specific docs for different exports
+# Export context-specific collections for different projects
+```
+
 **Key advantages:**
 - **Token efficiency**: No repeated WebFetch calls for same docs
 - **Organized context**: Clean @file references instead of raw content dumps
@@ -98,6 +108,16 @@ Share the output `team-onboarding` folder by:
 - Including in new hire packages
 
 New team members get organized, working documentation with functioning links and no broken references.
+
+**Interactive Organization:**
+For larger team documentation collections, use the interactive manager to organize and maintain your team docs:
+
+```bash
+# Visual organization of team resources
+npx github:jubalm/localdocs manage
+# Select relevant docs for different team roles
+# Export role-specific documentation packages
+```
 
 ### Programmable Documentation / Wiki Content
 
@@ -227,6 +247,17 @@ npx github:jubalm/localdocs export frontend-refs --format claude
 npx github:jubalm/localdocs add https://specific-framework-docs.com
 npx github:jubalm/localdocs export project-xyz-docs
 # Export travels with the project
+```
+
+**Interactive Management for Large Collections:**
+As your personal knowledge base grows, the interactive manager becomes invaluable:
+
+```bash
+# Visual organization of your knowledge base
+npx github:jubalm/localdocs manage
+# Quick selection of docs for specific projects
+# Bulk updates to keep everything current
+# Clean exports for different contexts
 ```
 
 **Result**: Portable personal knowledge base. Your curated documentation collection follows you across projects, machines, and workflows. No more re-researching the same topics or losing valuable research work.

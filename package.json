@@ -1,7 +1,7 @@
 {
   "name": "localdocs",
-  "version": "0.0.2",
-  "description": "Local documentation manager with versioning, content tracking, and LLM integration support",
+  "version": "0.1.0",
+  "description": "Lightweight documentation manager with interactive interface for LLM workflows",
   "author": "Jubal Mabaquiao <jubal.mabaquiao@gmail.com>",
   "license": "MIT",
   "bin": {
@@ -14,12 +14,12 @@
   ],
   "keywords": [
     "documentation",
-    "manager",
-    "versioning",
     "cli",
+    "llm",
+    "manager",
+    "interactive",
     "markdown",
     "local",
-    "llm",
     "knowledge-base"
   ],
   "repository": {
