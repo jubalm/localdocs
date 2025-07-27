@@ -389,51 +389,159 @@ class DocManager:
         print(f"Updated {hash_id}: {', '.join(updates)}")
         return True
     
-    def list_docs(self, tag_filters: Optional[List[str]] = None) -> bool:
-        """List all documents with hash IDs, optionally filtered by tags."""
+    def extract_data(self, format_type: str = 'table', tag_filters: Optional[List[str]] = None, 
+                    fields: Optional[List[str]] = None, has_tags: Optional[bool] = None,
+                    no_tags: bool = False, name_contains: Optional[str] = None, 
+                    desc_contains: Optional[str] = None, sort_by: str = 'id',
+                    reverse: bool = False, limit: Optional[int] = None, 
+                    quiet: bool = False, count_only: bool = False,
+                    output_file: Optional[str] = None) -> bool:
+        """Extract data from documents with flexible filtering and formatting."""
         if "documents" not in self.config or not self.config["documents"]:
-            print("No documents found")
-            print("Use 'localdocs add <url>' to add documents")
+            if not quiet and not count_only:
+                print("No documents found")
+                print("Use 'localdocs add <url>' to add documents")
             return True
         
         docs = self.config["documents"]
         
-        # Apply tag filtering if specified
+        # Apply filtering
         if tag_filters:
             docs = self._filter_docs_by_tags(docs, tag_filters)
-            if not docs:
-                print(f"No documents found with tags: {', '.join(tag_filters)}")
-                return True
         
-        # Print header
-        print(f"{'ID':<10} {'Name':<20} {'Tags':<20} {'Description'}")
-        print("-" * 80)
+        if has_tags is True:
+            docs = {k: v for k, v in docs.items() if v.get("tags", [])}
+        elif no_tags:
+            docs = {k: v for k, v in docs.items() if not v.get("tags", [])}
         
-        # Print documents
-        for hash_id, metadata in docs.items():
-            name = metadata.get("name") or "[unnamed]"
-            description = metadata.get("description") or "[no description]"
-            tags = metadata.get("tags", [])
-            
-            # Format tags for display
-            tags_str = ",".join(tags) if tags else ""
-            
-            # Truncate long fields for display
-            if len(name) > 18:
-                name = name[:15] + "..."
-            if len(tags_str) > 18:
-                tags_str = tags_str[:15] + "..."
-            if len(description) > 30:
-                description = description[:27] + "..."
-            
-            print(f"{hash_id:<10} {name:<20} {tags_str:<20} {description}")
+        if name_contains:
+            docs = {k: v for k, v in docs.items() 
+                   if name_contains.lower() in (v.get("name") or "").lower()}
         
-        # Print summary
-        total_docs = len(self.config["documents"])
-        if tag_filters:
-            print(f"\nShowing: {len(docs)} documents with tags [{', '.join(tag_filters)}] (Total: {total_docs})")
+        if desc_contains:
+            docs = {k: v for k, v in docs.items() 
+                   if desc_contains.lower() in (v.get("description") or "").lower()}
+        
+        # Handle count-only request
+        if count_only:
+            print(len(docs))
+            return True
+        
+        if not docs:
+            if not quiet:
+                print("No documents match the specified criteria")
+            return True
+        
+        # Sort documents
+        if sort_by == 'name':
+            sorted_items = sorted(docs.items(), key=lambda x: x[1].get("name") or "", reverse=reverse)
+        elif sort_by == 'url':
+            sorted_items = sorted(docs.items(), key=lambda x: x[1].get("url") or "", reverse=reverse)
+        elif sort_by == 'tags':
+            sorted_items = sorted(docs.items(), key=lambda x: ",".join(x[1].get("tags", [])), reverse=reverse)
+        else:  # id
+            sorted_items = sorted(docs.items(), key=lambda x: x[0], reverse=reverse)
+        
+        # Apply limit
+        if limit:
+            sorted_items = sorted_items[:limit]
+        
+        # Prepare field list
+        all_fields = ['id', 'name', 'description', 'tags', 'url']
+        if fields:
+            selected_fields = [f for f in fields if f in all_fields]
         else:
-            print(f"\nTotal: {len(docs)} documents")
+            selected_fields = all_fields
+        
+        # Generate output
+        output_lines = []
+        
+        if format_type == 'table':
+            if not quiet:
+                # Create header
+                headers = {'id': 'ID', 'name': 'Name', 'description': 'Description', 
+                          'tags': 'Tags', 'url': 'URL'}
+                header_line = " ".join(f"{headers[f]:<20}" for f in selected_fields)
+                output_lines.append(header_line)
+                output_lines.append("-" * len(header_line))
+            
+            for hash_id, metadata in sorted_items:
+                row_data = []
+                for field in selected_fields:
+                    if field == 'id':
+                        value = hash_id
+                    elif field == 'tags':
+                        value = ",".join(metadata.get("tags", []))
+                    else:
+                        value = metadata.get(field) or ""
+                    
+                    # Truncate for table display
+                    if len(value) > 18:
+                        value = value[:15] + "..."
+                    row_data.append(f"{value:<20}")
+                
+                output_lines.append(" ".join(row_data))
+            
+            if not quiet:
+                output_lines.append(f"\nTotal: {len(sorted_items)} documents")
+        
+        elif format_type == 'json':
+            import json
+            data = []
+            for hash_id, metadata in sorted_items:
+                doc_data = {'id': hash_id}
+                for field in selected_fields:
+                    if field == 'id':
+                        continue  # Already added
+                    elif field == 'tags':
+                        doc_data[field] = metadata.get("tags", [])
+                    else:
+                        doc_data[field] = metadata.get(field)
+                data.append(doc_data)
+            
+            output_lines.append(json.dumps(data, indent=2))
+        
+        elif format_type == 'csv':
+            import csv
+            import io
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            if not quiet:
+                writer.writerow(selected_fields)
+            
+            for hash_id, metadata in sorted_items:
+                row = []
+                for field in selected_fields:
+                    if field == 'id':
+                        row.append(hash_id)
+                    elif field == 'tags':
+                        row.append(",".join(metadata.get("tags", [])))
+                    else:
+                        row.append(metadata.get(field) or "")
+                writer.writerow(row)
+            
+            output_lines.append(output.getvalue().strip())
+        
+        elif format_type == 'ids':
+            for hash_id, _ in sorted_items:
+                output_lines.append(hash_id)
+        
+        # Output results
+        result = "\n".join(output_lines)
+        
+        if output_file:
+            try:
+                with open(output_file, 'w') as f:
+                    f.write(result)
+                if not quiet:
+                    print(f"Output written to {output_file}")
+            except Exception as e:
+                print(f"Error writing to {output_file}: {e}")
+                return False
+        else:
+            print(result)
+        
         return True
     
     def update_doc(self, hash_id: str) -> bool:
@@ -492,10 +600,10 @@ class DocManager:
         print(f"Removed '{name}' ({hash_id})")
         return True
     
-    def export_selected_package(self, package_name: str, include_docs: List[str], format_type: str = 'toc', soft_links: bool = False) -> bool:
-        """Export selected documents as a package."""
+    def package_selected_docs(self, package_name: str, include_docs: List[str], format_type: str = 'toc', soft_links: bool = False) -> bool:
+        """Package selected documents into a distributable bundle."""
         if "documents" not in self.config or not self.config["documents"]:
-            print("No documents available for export")
+            print("No documents available for packaging")
             return True
         
         # Validate package name for security
@@ -518,7 +626,7 @@ class DocManager:
             print(f"Warning: Documents not found: {', '.join(missing_docs)}")
         
         if not docs:
-            print("No valid documents to export")
+            print("No valid documents to package")
             return False
         
         # Create package directory
@@ -575,15 +683,15 @@ class DocManager:
             print(f"Error writing to {main_file_path}: {e}")
             return False
     
-    def export_package(self, package_name: str, format_type: str = 'toc', soft_links: bool = False) -> bool:
-        """Export all documents as a package."""
+    def package_all_docs(self, package_name: str, format_type: str = 'toc', soft_links: bool = False) -> bool:
+        """Package all documents into a distributable bundle."""
         if "documents" not in self.config or not self.config["documents"]:
-            print("No documents available for export")
+            print("No documents available for packaging")
             return True
         
-        # Export all documents by passing all document IDs
+        # Package all documents by passing all document IDs
         all_doc_ids = list(self.config["documents"].keys())
-        return self.export_selected_package(package_name, all_doc_ids, format_type, soft_links)
+        return self.package_selected_docs(package_name, all_doc_ids, format_type, soft_links)
     
     def _generate_format_with_relative_paths(self, docs: dict, format_type: str) -> str:
         """Generate format with relative paths for package export."""
@@ -749,9 +857,9 @@ class InteractiveManager:
         if not is_interactive_capable():
             print("Interactive mode requires a terminal that supports keyboard input.")
             print("Use regular CLI commands instead:")
-            print("  localdocs list    - Show all documents")
-            print("  localdocs export  - Export documents")
-            print("  localdocs remove  - Remove a document")
+            print("  localdocs extract  - Extract document data")
+            print("  localdocs package  - Create document packages")
+            print("  localdocs remove   - Remove a document")
             return False
             
         # Load documents
@@ -926,8 +1034,8 @@ class InteractiveManager:
     def _render_controls(self, width: int) -> None:
         """Render control instructions at bottom of interface."""
         # Try extended labels first, then shorthand if needed
-        extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[f] Filters", "[d] Delete", "[x] Export", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
-        shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[f] Filters", "[d] Delete", "[x] Export", "[u] Update", "[s] Set", "[q] Quit"]
+        extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[f] Filters", "[d] Delete", "[x] Package", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
+        shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[f] Filters", "[d] Delete", "[x] Package", "[u] Update", "[s] Set", "[q] Quit"]
         
         min_spacing = MIN_SPACING  # Comfortable spacing between controls
         horizontal_padding = HORIZONTAL_PADDING  # 2 spaces on each side for breathing room
@@ -1058,8 +1166,8 @@ class InteractiveManager:
         elif key in ('d', 'D'):  # Delete selected
             self._handle_delete()
             
-        elif key in ('x', 'X'):  # Export selected
-            self._handle_export()
+        elif key in ('x', 'X'):  # Package selected
+            self._handle_package()
             
         elif key in ('u', 'U'):  # Update selected
             self._handle_update()
@@ -1111,17 +1219,17 @@ class InteractiveManager:
         else:
             self._show_message("Deletion cancelled.")
     
-    def _handle_export(self) -> None:
-        """Handle export operation with confirmation."""
+    def _handle_package(self) -> None:
+        """Handle package creation with confirmation."""
         if not self.selected:
-            self._show_message("No documents selected for export.")
+            self._show_message("No documents selected for packaging.")
             return
             
         clear_screen()
-        print("Export the following documents?")
+        print("Package the following documents?")
         print()
         
-        # Show what will be exported
+        # Show what will be packaged
         for hash_id in self.selected:
             metadata = self.manager.config["documents"][hash_id]
             name = metadata.get("name") or "[unnamed]"
@@ -1130,11 +1238,11 @@ class InteractiveManager:
         print()
         package_name = input("Package name: ").strip()
         if not package_name:
-            self._show_message("Export cancelled - no package name provided.")
+            self._show_message("Package cancelled - no package name provided.")
             return
         
         if not validate_package_name(package_name):
-            self._show_message("Export cancelled - invalid package name. Use only alphanumeric characters, hyphens, underscores, and dots.")
+            self._show_message("Package cancelled - invalid package name. Use only alphanumeric characters, hyphens, underscores, and dots.")
             return
             
         format_choice = input("Format [toc/claude/json] (default: toc): ").strip().lower()
@@ -1144,15 +1252,14 @@ class InteractiveManager:
         response = input(f"Create package '{package_name}'? [Y/n]: ").strip().lower()
         
         if response in ('', 'y', 'yes'):
-            # Use the new selective export method
             selected_doc_ids = list(self.selected)
-            success = self.manager.export_selected_package(package_name, selected_doc_ids, format_choice, False)
+            success = self.manager.package_selected_docs(package_name, selected_doc_ids, format_choice, False)
             if success:
                 self._show_message(f"Package '{package_name}' created successfully.")
             else:
-                self._show_message("Export failed.")
+                self._show_message("Package creation failed.")
         else:
-            self._show_message("Export cancelled.")
+            self._show_message("Package creation cancelled.")
     
     def _handle_update(self) -> None:
         """Handle update operation with confirmation."""
@@ -1356,9 +1463,23 @@ def main() -> None:
         set_parser.add_argument('-d', '--description', help='Document description')
         set_parser.add_argument('-t', '--tags', help='Comma-separated tags (e.g., "frontend,react,tutorial")')
         
-        # List command
-        list_parser = subparsers.add_parser('list', help='List all documents')
-        list_parser.add_argument('--tags', help='Filter by tags (comma-separated, AND logic)')
+        # Extract command
+        extract_parser = subparsers.add_parser('extract', help='Extract data from documents')
+        extract_parser.add_argument('--format', choices=['table', 'json', 'csv', 'ids'], 
+                                   default='table', help='Output format (default: table)')
+        extract_parser.add_argument('--fields', help='Comma-separated field list: id,name,description,tags,url')
+        extract_parser.add_argument('--tags', help='Filter by tags (comma-separated, OR logic)')
+        extract_parser.add_argument('--has-tags', action='store_true', help='Only documents with tags')
+        extract_parser.add_argument('--no-tags', action='store_true', help='Only documents without tags')
+        extract_parser.add_argument('--name-contains', help='Filter by name containing text')
+        extract_parser.add_argument('--desc-contains', help='Filter by description containing text')
+        extract_parser.add_argument('--sort-by', choices=['id', 'name', 'url', 'tags'], 
+                                   default='id', help='Sort results by field (default: id)')
+        extract_parser.add_argument('--reverse', action='store_true', help='Reverse sort order')
+        extract_parser.add_argument('--limit', type=int, help='Limit number of results')
+        extract_parser.add_argument('--quiet', action='store_true', help='No headers or summaries')
+        extract_parser.add_argument('--count-only', action='store_true', help='Output only count of matches')
+        extract_parser.add_argument('--output', help='Write output to file instead of stdout')
         
         # Update command
         update_parser = subparsers.add_parser('update', help='Update documents')
@@ -1368,17 +1489,17 @@ def main() -> None:
         remove_parser = subparsers.add_parser('remove', help='Remove document')
         remove_parser.add_argument('hash_id', help='Document hash ID')
         
-        # Export command
-        export_parser = subparsers.add_parser('export', help='Export documentation packages')
-        export_parser.add_argument('package_name', help='Package directory name')
-        export_parser.add_argument('--format', choices=['toc', 'claude', 'json'], 
-                                  default='toc', help='Export format (default: toc)')
-        export_parser.add_argument('--soft-links', action='store_true',
-                                  help='Use absolute paths without copying files')
-        export_parser.add_argument('--include', 
-                                  help='Comma-separated list of document IDs to include (default: all documents)')
-        export_parser.add_argument('--tags',
-                                  help='Filter by tags (comma-separated, AND logic) - can combine with --include')
+        # Package command
+        package_parser = subparsers.add_parser('package', help='Create documentation packages')
+        package_parser.add_argument('package_name', help='Package directory name')
+        package_parser.add_argument('--format', choices=['toc', 'claude', 'json'], 
+                                   default='toc', help='Package format (default: toc)')
+        package_parser.add_argument('--soft-links', action='store_true',
+                                   help='Use absolute paths without copying files')
+        package_parser.add_argument('--include', 
+                                   help='Comma-separated list of document IDs to include (default: all documents)')
+        package_parser.add_argument('--tags',
+                                   help='Filter by tags (comma-separated, OR logic) - can combine with --include')
         
         # Manage command
         manage_parser = subparsers.add_parser('manage', help='Interactive document manager')
@@ -1402,11 +1523,32 @@ def main() -> None:
                 manager.add_interactive()
         elif args.command == 'set':
             manager.set_metadata(args.hash_id, args.name, args.description, args.tags)
-        elif args.command == 'list':
+        elif args.command == 'extract':
+            # Parse fields if provided
+            fields = None
+            if args.fields:
+                fields = [field.strip() for field in args.fields.split(',') if field.strip()]
+            
+            # Parse tag filters
             tag_filters = None
             if args.tags:
                 tag_filters = manager._validate_and_clean_tags(args.tags)
-            manager.list_docs(tag_filters)
+            
+            manager.extract_data(
+                format_type=args.format,
+                tag_filters=tag_filters,
+                fields=fields,
+                has_tags=args.has_tags if hasattr(args, 'has_tags') else None,
+                no_tags=args.no_tags,
+                name_contains=args.name_contains,
+                desc_contains=args.desc_contains,
+                sort_by=args.sort_by,
+                reverse=args.reverse,
+                limit=args.limit,
+                quiet=args.quiet,
+                count_only=args.count_only,
+                output_file=args.output
+            )
         elif args.command == 'update':
             if args.hash_id:
                 manager.update_doc(args.hash_id)
@@ -1414,8 +1556,8 @@ def main() -> None:
                 manager.update_all()
         elif args.command == 'remove':
             manager.remove_doc(args.hash_id)
-        elif args.command == 'export':
-            # Determine which documents to export
+        elif args.command == 'package':
+            # Determine which documents to package
             if args.include or args.tags:
                 # Start with all documents
                 all_docs = manager.config.get("documents", {})
@@ -1433,15 +1575,15 @@ def main() -> None:
                     selected_docs = {doc_id: metadata for doc_id, metadata in selected_docs.items() 
                                    if doc_id in include_doc_ids}
                 
-                # Export selected documents
+                # Package selected documents
                 include_docs = list(selected_docs.keys())
                 if include_docs:
-                    manager.export_selected_package(args.package_name, include_docs, args.format, args.soft_links)
+                    manager.package_selected_docs(args.package_name, include_docs, args.format, args.soft_links)
                 else:
                     print("No documents match the specified criteria")
             else:
-                # Export all documents (existing behavior)
-                manager.export_package(args.package_name, args.format, args.soft_links)
+                # Package all documents (existing behavior)
+                manager.package_all_docs(args.package_name, args.format, args.soft_links)
         elif args.command == 'manage':
             interactive = InteractiveManager(manager)
             interactive.run()
