@@ -205,15 +205,23 @@ class DocManager:
         return valid_tags
     
     def _filter_docs_by_tags(self, docs: dict, tag_filters: List[str]) -> dict:
-        """Filter documents by tags using AND logic (document must have ALL tags)."""
+        """Filter documents by tags using OR logic (document must have ANY selected tag, or no tags for untagged docs)."""
         if not tag_filters:
-            return docs
+            return {}  # No tags selected = show nothing
+        
+        # If all available tags are selected, show all documents
+        all_available_tags = set()
+        for metadata in docs.values():
+            all_available_tags.update(metadata.get("tags", []))
+        
+        if set(tag_filters) == all_available_tags:
+            return docs  # All tags selected = show all documents
         
         filtered_docs = {}
         for hash_id, metadata in docs.items():
             doc_tags = metadata.get("tags", [])
-            # Check if document has ALL required tags
-            if all(tag in doc_tags for tag in tag_filters):
+            # Show document if it has ANY of the selected tags, or if it has no tags and no filters
+            if any(tag in tag_filters for tag in doc_tags) or (not doc_tags and not tag_filters):
                 filtered_docs[hash_id] = metadata
         
         return filtered_docs
@@ -753,7 +761,7 @@ class InteractiveManager:
         
         # Initialize tag filtering system
         self._collect_available_tags()
-        self.current_tag_filters = set()
+        self.current_tag_filters = self.available_tags.copy()  # Start with all tags selected
         self.current_index = 0
         self.selected = set()
         self._update_docs_list()
@@ -1246,7 +1254,7 @@ class InteractiveManager:
             print()
             print(f"{filtered_count} documents match current filters (Total: {total_count})")
             print()
-            print("[j/k/↕] navigate  [space] toggle  [c] clear all  [enter/esc] back to documents")
+            print("[j/k/↕] navigate  [space] toggle  [a] toggle all  [enter/esc] back to documents")
             
             key = get_char()
             
@@ -1261,11 +1269,13 @@ class InteractiveManager:
                     next_char = get_char()
                     if next_char == '[':
                         arrow_key = get_char()
-                        if arrow_key == 'A' and current_tag_index > 0:  # Up arrow
-                            current_tag_index -= 1
+                        if arrow_key == 'A':  # Up arrow
+                            if current_tag_index > 0:
+                                current_tag_index -= 1
                             arrow_handled = True
-                        elif arrow_key == 'B' and current_tag_index < len(available_tags_list) - 1:  # Down arrow
-                            current_tag_index += 1
+                        elif arrow_key == 'B':  # Down arrow
+                            if current_tag_index < len(available_tags_list) - 1:
+                                current_tag_index += 1
                             arrow_handled = True
                         # For left/right arrows (C/D), just mark as handled but ignore
                         elif arrow_key in ('C', 'D'):
@@ -1286,9 +1296,14 @@ class InteractiveManager:
                     self.current_tag_filters.add(current_tag)
                 # Update docs list and clean selections
                 self._update_docs_list()
-            elif key in ('c', 'C'):
-                # Clear all filters
-                self.current_tag_filters.clear()
+            elif key in ('a', 'A'):
+                # Smart toggle all - same logic as main interface
+                if len(self.current_tag_filters) == len(self.available_tags):
+                    # All selected - deselect all
+                    self.current_tag_filters.clear()
+                else:
+                    # Some or none selected - select all
+                    self.current_tag_filters = self.available_tags.copy()
                 self._update_docs_list()
             elif key in ('\r', '\n'):  # Enter to exit
                 break  # Return to main interface
