@@ -67,7 +67,8 @@ Command executed → Check ./localdocs.config.json → Found? → Use project co
     "a1b2c3d4": {
       "url": "https://docs.python.org/3/tutorial/",
       "name": "Python Tutorial",
-      "description": "Official Python 3 tutorial"
+      "description": "Official Python 3 tutorial",
+      "tags": ["python", "language", "tutorial"]
     }
   }
 }
@@ -86,7 +87,7 @@ localdocs add <URL>
        ↓
    Save as {hash_id}.md (clean content, no frontmatter)
        ↓
-   Update config with metadata: {"url": URL, "name": null, "description": null}
+   Update config with metadata: {"url": URL, "name": null, "description": null, "tags": []}
 ```
 
 ### Download Process
@@ -102,7 +103,6 @@ request = urllib.request.Request(url, headers={
 ### Content Storage
 
 - Files are saved as pure markdown with `.md` extension
-- **No frontmatter** - content remains completely clean
 - **No metadata pollution** - perfect for LLM consumption
 - Encoding is explicitly set to UTF-8 for international content
 
@@ -112,6 +112,7 @@ The config file tracks essential metadata separately from content:
 - `url`: Original source URL
 - `name`: Human-readable name (initially null)
 - `description`: Brief description (initially null)
+- `tags`: Array of organization tags (initially empty)
 
 ## 4. Storage Structure
 
@@ -174,7 +175,53 @@ my-export/
 └── localdocs.config.json
 ```
 
-## 6. Update Mechanism
+## 6. Document Tagging System
+
+LocalDocs includes a flexible tagging system for organizing and filtering document collections:
+
+### Tag Structure
+- **Format**: Alphanumeric characters + hyphens only (e.g., `frontend`, `react-hooks`)
+- **Limits**: Maximum 20 characters per tag, 10 tags per document
+- **Storage**: Array of strings in document metadata
+
+### Tag Operations
+```bash
+# Add tags to documents
+localdocs set a1b2c3d4 -t "frontend,react,tutorial"
+
+# List documents by tags (AND logic)
+localdocs list --tags frontend,react
+
+# Export filtered by tags (OR logic in interactive, AND in CLI)
+localdocs export frontend-docs --tags frontend,react
+```
+
+### Export with Tags
+The export system supports tag-based filtering to create focused documentation packages:
+
+```bash
+# Export only documents with ALL specified tags (AND logic)
+localdocs export frontend-docs --tags frontend,react
+
+# Creates package containing only documents tagged with both 'frontend' AND 'react'
+# Useful for creating specialized documentation collections
+```
+
+**Export filtering behavior:**
+- CLI exports use AND logic: documents must have ALL specified tags
+- Interactive exports use OR logic: documents with ANY selected tag included
+- Empty tag filter exports all documents (default behavior)
+
+### Tag Validation
+Tags are automatically validated and cleaned:
+```python
+def _validate_and_clean_tags(self, tags_input: str) -> List[str]:
+    # Split by comma, lowercase, validate format
+    # Remove duplicates, enforce limits
+    # Return clean tag list
+```
+
+## 7. Update Mechanism
 
 Documents can be refreshed individually or in batch:
 
@@ -185,7 +232,7 @@ The update process:
 1. Looks up original URL from config
 2. Re-downloads content
 3. Overwrites existing `.md` file
-4. Preserves existing metadata (name, description)
+4. Preserves existing metadata (name, description, tags)
 
 ## Key Design Decisions
 

@@ -46,75 +46,37 @@ This approach is especially powerful for large collections where CLI commands be
 | d | Delete selected | Shows confirmation with document list |
 | x | Export selected | Prompts for package name and format |
 | u | Update selected | Re-downloads from original URLs |
-| s | Set metadata | Edit name/description of current document |
+| s | Set metadata | Edit name/description/tags of current document |
 | f | Tag filters | Open visual tag filtering interface |
 | q | Quit | Shows confirmation if documents selected |
 
-## Tag Filtering
+## Document Tagging
 
-Press `f` to enter the **visual tag filtering mode** - a powerful way to organize and filter large document collections by tags.
+LocalDocs supports tagging documents for better organization. Use `s` to edit metadata for the current document, where you can add tags alongside names and descriptions. Tags help categorize your documentation (e.g., `frontend,react,tutorial`) and enable filtering both in CLI (`localdocs list --tags frontend`) and interactive mode.
 
-### How Tag Filtering Works
+### Visual Tag Filtering
 
-**Initial State**: All tags are selected (✓), showing all documents  
-**Filter by deselecting**: Uncheck tags to hide documents that only have those tags  
-**Smart OR logic**: Documents with ANY selected tag remain visible
+For collections with many documents, press `f` to enter tag filter mode where you can visually select which tag categories to include. Start with all tags selected (showing all documents), then deselect tags to focus on specific content. This makes it much easier to create focused exports - filter by `frontend,react` tags first, then select and export only the relevant documentation.
 
-### Tag Filter Controls
-
-| Key | Action | Notes |
-|-----|--------|-------|
-| j/k, ↓/↑ | Navigate tags | Move through available tags |
-| Space | Toggle tag | Check/uncheck current tag |
-| a | Toggle all/none | Smart toggle - all selected ↔ none selected |
-| Enter/Esc | Exit filter mode | Return to document list |
-
-### Filter Mode Workflow
-
-1. **Start filtering**: Press `f` from main document view
-2. **Review tags**: See all available tags in your collection
-3. **Deselect unwanted**: Uncheck tags to filter out content
-4. **See results**: Real-time count shows matching documents
-5. **Return**: Press Enter/Esc to return with filters applied
-
-### Practical Examples
-
-**Scenario: Focus on frontend documentation**
-```
-> Press 'f' to enter filter mode
-> Deselect 'backend', 'database', 'devops' tags
-> Keep 'frontend', 'react', 'css' selected
-> Press Enter to return
-Result: Only frontend-related documents visible
-```
-
-**Status line shows active filters:**
-- `Selected: 3/8 documents tagged frontend, react`
-- `Selected: 2/5 documents tagged api, +2 more`
-
-### Filter Benefits
-
-- **Large collections**: Quickly focus on relevant documentation
-- **Selective operations**: Bulk delete/export only filtered documents  
-- **Visual clarity**: See exactly what tags are filtering your view
-- **Non-destructive**: Original document selection preserved where possible
+**Filter mode controls:**
+| Key | Action |
+|-----|--------|
+| j/k, ↑/↓ | Navigate tags |
+| Space | Toggle tag on/off |
+| a | Toggle all/none |
+| Enter/Esc | Exit filter mode |
 
 ## Common Usage
 
 **Selection strategies:**
 - Use 'a' to select all, then deselect unwanted items with space
 - Visual selection is faster than remembering hash IDs
-- **Filter first, then select**: Use `f` to narrow down documents, then select what you need
-
-**Tag-enhanced workflows:**
-- **Filter → Select → Export**: Filter by tags, select documents, export focused collections
-- **Filter → Bulk delete**: Remove outdated documentation by tag category
-- **Tag organization**: Use `s` to add tags, then `f` to verify organization
+- Create focused exports for specific use cases
 
 **CLI integration:**
-- Use CLI commands for quick single operations (`localdocs list --tags frontend`)
-- Switch to interactive mode for complex organization and visual filtering
-- Return to CLI for automated workflows and scripting
+- Use CLI commands for quick single operations
+- Switch to interactive mode for complex organization
+- Return to CLI for automated workflows
 
 
 The interactive manager transforms LocalDocs from a simple CLI tool into a comprehensive document management system while maintaining the lightweight, zero-config philosophy.
