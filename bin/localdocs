@@ -157,6 +157,9 @@ class DocManager:
                 # Clean up old fields from previous versions
                 if "max_keep_versions" in config:
                     del config["max_keep_versions"]
+                
+                # Migrate documents to include tags field
+                self._migrate_tags(config)
                     
                 return config
         else:
@@ -164,6 +167,64 @@ class DocManager:
                 "storage_directory": ".",
                 "documents": {}
             }
+    
+    def _migrate_tags(self, config: dict) -> None:
+        """Migrate documents to include tags field for backward compatibility."""
+        if "documents" in config:
+            for hash_id, metadata in config["documents"].items():
+                if "tags" not in metadata:
+                    metadata["tags"] = []
+    
+    def _validate_and_clean_tags(self, tags_input: str) -> List[str]:
+        """Validate and clean tag input string. Returns list of valid tags."""
+        if not tags_input.strip():
+            return []
+        
+        # Split by comma and clean each tag
+        raw_tags = [tag.strip().lower() for tag in tags_input.split(',')]
+        valid_tags = []
+        
+        for tag in raw_tags:
+            if not tag:  # Skip empty strings
+                continue
+            
+            # Validate tag format: alphanumeric + hyphens, max 20 chars
+            if not tag.replace('-', '').isalnum() or len(tag) > 20:
+                print(f"Warning: Skipping invalid tag '{tag}' (use alphanumeric + hyphens, max 20 chars)")
+                continue
+            
+            # Avoid duplicates
+            if tag not in valid_tags:
+                valid_tags.append(tag)
+        
+        # Limit to 10 tags max
+        if len(valid_tags) > 10:
+            print(f"Warning: Only keeping first 10 tags (limit exceeded)")
+            valid_tags = valid_tags[:10]
+        
+        return valid_tags
+    
+    def _filter_docs_by_tags(self, docs: dict, tag_filters: List[str]) -> dict:
+        """Filter documents by tags using OR logic (document must have ANY selected tag, or no tags for untagged docs)."""
+        if not tag_filters:
+            return {}  # No tags selected = show nothing
+        
+        # If all available tags are selected, show all documents
+        all_available_tags = set()
+        for metadata in docs.values():
+            all_available_tags.update(metadata.get("tags", []))
+        
+        if set(tag_filters) == all_available_tags:
+            return docs  # All tags selected = show all documents
+        
+        filtered_docs = {}
+        for hash_id, metadata in docs.items():
+            doc_tags = metadata.get("tags", [])
+            # Show document if it has ANY of the selected tags, or if it has no tags and no filters
+            if any(tag in tag_filters for tag in doc_tags) or (not doc_tags and not tag_filters):
+                filtered_docs[hash_id] = metadata
+        
+        return filtered_docs
     
     def _save_config(self) -> None:
         """Save config to disk."""
@@ -236,7 +297,8 @@ class DocManager:
             self.config["documents"][hash_id] = {
                 "url": url,
                 "name": None,
-                "description": None
+                "description": None,
+                "tags": []
             }
         else:
             # Preserve existing metadata, just update URL
@@ -292,8 +354,8 @@ class DocManager:
         else:
             print("No URLs entered")
     
-    def set_metadata(self, hash_id: str, name: Optional[str] = None, description: Optional[str] = None) -> bool:
-        """Set name and description for a document."""
+    def set_metadata(self, hash_id: str, name: Optional[str] = None, description: Optional[str] = None, tags: Optional[str] = None) -> bool:
+        """Set name, description, and tags for a document."""
         if "documents" not in self.config:
             self.config["documents"] = {}
         
@@ -306,6 +368,9 @@ class DocManager:
             self.config["documents"][hash_id]["name"] = name
         if description is not None:
             self.config["documents"][hash_id]["description"] = description
+        if tags is not None:
+            valid_tags = self._validate_and_clean_tags(tags)
+            self.config["documents"][hash_id]["tags"] = valid_tags
         
         self._save_config()
         
@@ -314,12 +379,18 @@ class DocManager:
             updates.append(f"name: '{name}'")
         if description is not None:
             updates.append(f"description: '{description}'")
+        if tags is not None:
+            tag_list = self.config["documents"][hash_id]["tags"]
+            if tag_list:
+                updates.append(f"tags: [{', '.join(tag_list)}]")
+            else:
+                updates.append("tags: []")
         
         print(f"Updated {hash_id}: {', '.join(updates)}")
         return True
     
-    def list_docs(self) -> bool:
-        """List all documents with hash IDs."""
+    def list_docs(self, tag_filters: Optional[List[str]] = None) -> bool:
+        """List all documents with hash IDs, optionally filtered by tags."""
         if "documents" not in self.config or not self.config["documents"]:
             print("No documents found")
             print("Use 'localdocs add <url>' to add documents")
@@ -327,24 +398,42 @@ class DocManager:
         
         docs = self.config["documents"]
         
+        # Apply tag filtering if specified
+        if tag_filters:
+            docs = self._filter_docs_by_tags(docs, tag_filters)
+            if not docs:
+                print(f"No documents found with tags: {', '.join(tag_filters)}")
+                return True
+        
         # Print header
-        print(f"{'ID':<10} {'Name':<25} {'Description'}")
-        print("-" * 70)
+        print(f"{'ID':<10} {'Name':<20} {'Tags':<20} {'Description'}")
+        print("-" * 80)
         
         # Print documents
         for hash_id, metadata in docs.items():
             name = metadata.get("name") or "[unnamed]"
             description = metadata.get("description") or "[no description]"
+            tags = metadata.get("tags", [])
             
-            # Truncate long names/descriptions for display
-            if len(name) > 23:
-                name = name[:20] + "..."
-            if len(description) > 40:
-                description = description[:37] + "..."
+            # Format tags for display
+            tags_str = ",".join(tags) if tags else ""
             
-            print(f"{hash_id:<10} {name:<25} {description}")
+            # Truncate long fields for display
+            if len(name) > 18:
+                name = name[:15] + "..."
+            if len(tags_str) > 18:
+                tags_str = tags_str[:15] + "..."
+            if len(description) > 30:
+                description = description[:27] + "..."
+            
+            print(f"{hash_id:<10} {name:<20} {tags_str:<20} {description}")
         
-        print(f"\nTotal: {len(docs)} documents")
+        # Print summary
+        total_docs = len(self.config["documents"])
+        if tag_filters:
+            print(f"\nShowing: {len(docs)} documents with tags [{', '.join(tag_filters)}] (Total: {total_docs})")
+        else:
+            print(f"\nTotal: {len(docs)} documents")
         return True
     
     def update_doc(self, hash_id: str) -> bool:
@@ -556,6 +645,7 @@ class DocManager:
                 "name": metadata.get("name"),
                 "description": metadata.get("description"),
                 "url": metadata.get("url"),
+                "tags": metadata.get("tags", []),
                 "file": f"{hash_id}.md"
             }
             
@@ -620,6 +710,39 @@ class InteractiveManager:
         self.current_index = 0  # Current cursor position
         self.docs_list = []  # Ordered list of (hash_id, metadata) tuples
         self.last_terminal_size = None  # Track terminal size changes
+        self.current_tag_filters = set()  # Set of active tag filters
+        self.available_tags = set()  # All tags available in the collection
+        self.in_filter_mode = False  # Whether we're in tag filter mode
+    
+    def _collect_available_tags(self) -> None:
+        """Collect all unique tags from the document collection."""
+        self.available_tags = set()
+        if "documents" in self.manager.config:
+            for metadata in self.manager.config["documents"].values():
+                tags = metadata.get("tags", [])
+                self.available_tags.update(tags)
+    
+    def _get_filtered_docs(self) -> dict:
+        """Get documents filtered by current tag filters."""
+        all_docs = self.manager.config.get("documents", {})
+        if not self.current_tag_filters:
+            return all_docs
+        return self.manager._filter_docs_by_tags(all_docs, list(self.current_tag_filters))
+    
+    def _update_docs_list(self) -> None:
+        """Update the docs list with current filtering and clean up invalid selections."""
+        filtered_docs = self._get_filtered_docs()
+        self.docs_list = list(filtered_docs.items())
+        
+        # Clean up selections - remove documents that are no longer visible
+        visible_doc_ids = set(filtered_docs.keys())
+        self.selected = self.selected.intersection(visible_doc_ids)
+        
+        # Adjust current index if needed
+        if self.docs_list:
+            self.current_index = min(self.current_index, len(self.docs_list) - 1)
+        else:
+            self.current_index = 0
         
     def run(self) -> bool:
         """Main interactive loop."""
@@ -635,10 +758,13 @@ class InteractiveManager:
         if "documents" not in self.manager.config or not self.manager.config["documents"]:
             print("No documents found. Use 'localdocs add <url>' to add documents first.")
             return True
-            
-        self.docs_list = list(self.manager.config["documents"].items())
+        
+        # Initialize tag filtering system
+        self._collect_available_tags()
+        self.current_tag_filters = self.available_tags.copy()  # Start with all tags selected
         self.current_index = 0
         self.selected = set()
+        self._update_docs_list()
         
         try:
             # Initial render
@@ -692,12 +818,16 @@ class InteractiveManager:
             # Document info
             name = metadata.get("name") or "[unnamed]"
             description = metadata.get("description") or "[no description]"
+            tags = metadata.get("tags", [])
             
             # Main line: cursor + checkbox + hash_id
             print(f"{cursor} {checkbox} {hash_id}")
             
-            # Tree branches: name and description with indentation
+            # Tree branches: name, tags, and description with indentation
             print(f"     ├─ {name}")
+            if tags:
+                tags_str = ",".join(tags)
+                print(f"     ├─ tags: {tags_str}")
             
             # Handle long descriptions by wrapping
             desc_width = width - 8  # Account for indentation "     └─ "
@@ -796,8 +926,8 @@ class InteractiveManager:
     def _render_controls(self, width: int) -> None:
         """Render control instructions at bottom of interface."""
         # Try extended labels first, then shorthand if needed
-        extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[d] Delete", "[x] Export", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
-        shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[d] Delete", "[x] Export", "[u] Update", "[s] Set", "[q] Quit"]
+        extended_controls = ["[j/k] Navigate", "[Space] Toggle selection", "[a] Select/deselect all", "[f] Filters", "[d] Delete", "[x] Export", "[u] Update selected", "[s] Set metadata", "[q] Quit"]
+        shorthand_controls = ["[j/k] Nav", "[Space] Select", "[a] All", "[f] Filters", "[d] Delete", "[x] Export", "[u] Update", "[s] Set", "[q] Quit"]
         
         min_spacing = MIN_SPACING  # Comfortable spacing between controls
         horizontal_padding = HORIZONTAL_PADDING  # 2 spaces on each side for breathing room
@@ -862,7 +992,19 @@ class InteractiveManager:
         
         # Status and controls
         print()
-        print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents")
+        
+        # Create status line with tag filter information
+        total_docs = len(self.manager.config.get("documents", {}))
+        if self.current_tag_filters:
+            # Show filtered status
+            tag_list = sorted(list(self.current_tag_filters))
+            if len(tag_list) <= 3:
+                tags_str = ", ".join(tag_list)
+            else:
+                tags_str = f"{', '.join(tag_list[:3])}, +{len(tag_list)-3} more"
+            print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents tagged {tags_str}")
+        else:
+            print(f"Selected: {len(self.selected)}/{len(self.docs_list)} documents")
         print()
         
         self._render_controls(width)
@@ -924,6 +1066,9 @@ class InteractiveManager:
             
         elif key in ('s', 'S'):  # Set metadata for current
             self._handle_set_metadata()
+        
+        elif key in ('f', 'F'):  # Filter by tags
+            self._handle_tag_filter_mode()
         
         return True
     
@@ -1073,10 +1218,95 @@ class InteractiveManager:
                                 new_name if new_name != current_name else None,
                                 new_description if new_description != current_desc else None)
         
-        # Refresh docs list
-        self.docs_list = list(self.manager.config["documents"].items())
+        # Refresh docs list and tags (tags might have changed)
+        self._collect_available_tags()
+        self._update_docs_list()
         
         self._show_message(f"Updated metadata for {current_hash_id}.")
+    
+    def _handle_tag_filter_mode(self) -> None:
+        """Handle tag filter mode interface."""
+        if not self.available_tags:
+            self._show_message("No tags available in the collection.")
+            return
+        
+        # Convert available tags to a sorted list for consistent ordering
+        available_tags_list = sorted(list(self.available_tags))
+        current_tag_index = 0
+        
+        while True:
+            clear_screen()
+            
+            # Calculate filtered doc count
+            temp_filtered = self._get_filtered_docs()
+            filtered_count = len(temp_filtered)
+            total_count = len(self.manager.config.get("documents", {}))
+            
+            print("Filter by tags:")
+            print()
+            
+            # Display tags with checkboxes
+            for i, tag in enumerate(available_tags_list):
+                cursor = ">" if i == current_tag_index else " "
+                checkbox = "[x]" if tag in self.current_tag_filters else "[ ]"
+                print(f"{cursor} {checkbox} {tag}")
+            
+            print()
+            print(f"{filtered_count} documents match current filters (Total: {total_count})")
+            print()
+            print("[j/k/↕] navigate  [space] toggle  [a] toggle all  [enter/esc] back to documents")
+            
+            key = get_char()
+            
+            if key in ('j',) and current_tag_index < len(available_tags_list) - 1:
+                current_tag_index += 1
+            elif key in ('k',) and current_tag_index > 0:
+                current_tag_index -= 1
+            elif key == '\x1b':  # Escape - handle arrow keys or exit
+                # Try to read arrow key sequence, similar to main interface
+                arrow_handled = False
+                try:
+                    next_char = get_char()
+                    if next_char == '[':
+                        arrow_key = get_char()
+                        if arrow_key == 'A':  # Up arrow
+                            if current_tag_index > 0:
+                                current_tag_index -= 1
+                            arrow_handled = True
+                        elif arrow_key == 'B':  # Down arrow
+                            if current_tag_index < len(available_tags_list) - 1:
+                                current_tag_index += 1
+                            arrow_handled = True
+                        # For left/right arrows (C/D), just mark as handled but ignore
+                        elif arrow_key in ('C', 'D'):
+                            arrow_handled = True
+                except:
+                    # Error reading sequence
+                    pass
+                
+                # If it wasn't an arrow key, treat as exit command
+                if not arrow_handled:
+                    break
+            elif key == ' ' and available_tags_list:
+                # Toggle current tag
+                current_tag = available_tags_list[current_tag_index]
+                if current_tag in self.current_tag_filters:
+                    self.current_tag_filters.remove(current_tag)
+                else:
+                    self.current_tag_filters.add(current_tag)
+                # Update docs list and clean selections
+                self._update_docs_list()
+            elif key in ('a', 'A'):
+                # Smart toggle all - same logic as main interface
+                if len(self.current_tag_filters) == len(self.available_tags):
+                    # All selected - deselect all
+                    self.current_tag_filters.clear()
+                else:
+                    # Some or none selected - select all
+                    self.current_tag_filters = self.available_tags.copy()
+                self._update_docs_list()
+            elif key in ('\r', '\n'):  # Enter to exit
+                break  # Return to main interface
     
     def _handle_quit_confirmation(self) -> bool:
         """Handle quit confirmation. Returns False to quit, True to stay."""
@@ -1124,9 +1354,11 @@ def main() -> None:
         set_parser.add_argument('hash_id', help='Document hash ID')
         set_parser.add_argument('-n', '--name', help='Document name')
         set_parser.add_argument('-d', '--description', help='Document description')
+        set_parser.add_argument('-t', '--tags', help='Comma-separated tags (e.g., "frontend,react,tutorial")')
         
         # List command
         list_parser = subparsers.add_parser('list', help='List all documents')
+        list_parser.add_argument('--tags', help='Filter by tags (comma-separated, AND logic)')
         
         # Update command
         update_parser = subparsers.add_parser('update', help='Update documents')
@@ -1145,6 +1377,8 @@ def main() -> None:
                                   help='Use absolute paths without copying files')
         export_parser.add_argument('--include', 
                                   help='Comma-separated list of document IDs to include (default: all documents)')
+        export_parser.add_argument('--tags',
+                                  help='Filter by tags (comma-separated, AND logic) - can combine with --include')
         
         # Manage command
         manage_parser = subparsers.add_parser('manage', help='Interactive document manager')
@@ -1167,9 +1401,12 @@ def main() -> None:
             else:
                 manager.add_interactive()
         elif args.command == 'set':
-            manager.set_metadata(args.hash_id, args.name, args.description)
+            manager.set_metadata(args.hash_id, args.name, args.description, args.tags)
         elif args.command == 'list':
-            manager.list_docs()
+            tag_filters = None
+            if args.tags:
+                tag_filters = manager._validate_and_clean_tags(args.tags)
+            manager.list_docs(tag_filters)
         elif args.command == 'update':
             if args.hash_id:
                 manager.update_doc(args.hash_id)
@@ -1178,10 +1415,30 @@ def main() -> None:
         elif args.command == 'remove':
             manager.remove_doc(args.hash_id)
         elif args.command == 'export':
-            if args.include:
-                # Parse comma-separated document IDs
-                include_docs = [doc_id.strip() for doc_id in args.include.split(',') if doc_id.strip()]
-                manager.export_selected_package(args.package_name, include_docs, args.format, args.soft_links)
+            # Determine which documents to export
+            if args.include or args.tags:
+                # Start with all documents
+                all_docs = manager.config.get("documents", {})
+                selected_docs = all_docs.copy()
+                
+                # Apply tag filtering if specified
+                if args.tags:
+                    tag_filters = manager._validate_and_clean_tags(args.tags)
+                    selected_docs = manager._filter_docs_by_tags(selected_docs, tag_filters)
+                
+                # Apply ID filtering if specified (further narrows selection)
+                if args.include:
+                    include_doc_ids = [doc_id.strip() for doc_id in args.include.split(',') if doc_id.strip()]
+                    # Keep only docs that are both in tag filter results AND in include list
+                    selected_docs = {doc_id: metadata for doc_id, metadata in selected_docs.items() 
+                                   if doc_id in include_doc_ids}
+                
+                # Export selected documents
+                include_docs = list(selected_docs.keys())
+                if include_docs:
+                    manager.export_selected_package(args.package_name, include_docs, args.format, args.soft_links)
+                else:
+                    print("No documents match the specified criteria")
             else:
                 # Export all documents (existing behavior)
                 manager.export_package(args.package_name, args.format, args.soft_links)

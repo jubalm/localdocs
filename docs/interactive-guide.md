@@ -46,8 +46,25 @@ This approach is especially powerful for large collections where CLI commands be
 | d | Delete selected | Shows confirmation with document list |
 | x | Export selected | Prompts for package name and format |
 | u | Update selected | Re-downloads from original URLs |
-| s | Set metadata | Edit name/description of current document |
+| s | Set metadata | Edit name/description/tags of current document |
+| f | Tag filters | Open visual tag filtering interface |
 | q | Quit | Shows confirmation if documents selected |
+
+## Document Tagging
+
+LocalDocs supports tagging documents for better organization. Use `s` to edit metadata for the current document, where you can add tags alongside names and descriptions. Tags help categorize your documentation (e.g., `frontend,react,tutorial`) and enable filtering both in CLI (`localdocs list --tags frontend`) and interactive mode.
+
+### Visual Tag Filtering
+
+For collections with many documents, press `f` to enter tag filter mode where you can visually select which tag categories to include. Start with all tags selected (showing all documents), then deselect tags to focus on specific content. This makes it much easier to create focused exports - filter by `frontend,react` tags first, then select and export only the relevant documentation.
+
+**Filter mode controls:**
+| Key | Action |
+|-----|--------|
+| j/k, ↑/↓ | Navigate tags |
+| Space | Toggle tag on/off |
+| a | Toggle all/none |
+| Enter/Esc | Exit filter mode |
 
 ## Common Usage
 
