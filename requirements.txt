@@ -1,0 +1,2 @@
+# Core dependencies for LocalDocs
+aiohttp>=3.8.0  # For async HTTP operations
