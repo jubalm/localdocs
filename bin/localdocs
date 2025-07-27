@@ -1246,7 +1246,7 @@ class InteractiveManager:
             print()
             print(f"{filtered_count} documents match current filters (Total: {total_count})")
             print()
-            print("[j/k] navigate  [space] toggle  [c] clear all  [enter/esc] back to documents")
+            print("[j/k/↕] navigate  [space] toggle  [c] clear all  [enter/esc] back to documents")
             
             key = get_char()
             
@@ -1254,6 +1254,23 @@ class InteractiveManager:
                 current_tag_index += 1
             elif key in ('k',) and current_tag_index > 0:
                 current_tag_index -= 1
+            elif key == '\x1b':  # Escape - could be arrow key or actual escape
+                # Try to read arrow key sequence
+                try:
+                    next_char = get_char()
+                    if next_char == '[':
+                        arrow_key = get_char()
+                        if arrow_key == 'A' and current_tag_index > 0:  # Up arrow
+                            current_tag_index -= 1
+                        elif arrow_key == 'B' and current_tag_index < len(available_tags_list) - 1:  # Down arrow
+                            current_tag_index += 1
+                        # Ignore left/right arrows (C/D)
+                    else:
+                        # Not an arrow sequence, treat as escape to exit
+                        break
+                except:
+                    # Error reading sequence, treat as escape to exit
+                    break
             elif key == ' ' and available_tags_list:
                 # Toggle current tag
                 current_tag = available_tags_list[current_tag_index]
@@ -1267,7 +1284,7 @@ class InteractiveManager:
                 # Clear all filters
                 self.current_tag_filters.clear()
                 self._update_docs_list()
-            elif key in ('\r', '\n', '\x1b'):  # Enter or Escape
+            elif key in ('\r', '\n'):  # Enter to exit
                 break  # Return to main interface
     
     def _handle_quit_confirmation(self) -> bool:
