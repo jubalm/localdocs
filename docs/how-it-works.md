@@ -189,10 +189,10 @@ LocalDocs includes a flexible tagging system for organizing and filtering docume
 # Add tags to documents
 localdocs set a1b2c3d4 -t "frontend,react,tutorial"
 
-# List documents by tags (AND logic)
+# List documents by tags (OR logic)
 localdocs list --tags frontend,react
 
-# Export filtered by tags (OR logic in interactive, AND in CLI)
+# Export filtered by tags (OR logic)
 localdocs export frontend-docs --tags frontend,react
 ```
 
@@ -200,16 +200,16 @@ localdocs export frontend-docs --tags frontend,react
 The export system supports tag-based filtering to create focused documentation packages:
 
 ```bash
-# Export only documents with ALL specified tags (AND logic)
+# Export documents with ANY of the specified tags (OR logic)
 localdocs export frontend-docs --tags frontend,react
 
-# Creates package containing only documents tagged with both 'frontend' AND 'react'
-# Useful for creating specialized documentation collections
+# Creates package containing documents tagged with 'frontend' OR 'react' (or both)
+# Useful for creating broad topic-based documentation collections
 ```
 
 **Export filtering behavior:**
-- CLI exports use AND logic: documents must have ALL specified tags
-- Interactive exports use OR logic: documents with ANY selected tag included
+- Both CLI and interactive exports use OR logic: documents with ANY selected tag included
+- Combine multiple tags to create broader collections, not narrower ones
 - Empty tag filter exports all documents (default behavior)
 
 ### Tag Validation
