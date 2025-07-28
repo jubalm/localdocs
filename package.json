@@ -4,14 +4,30 @@
   "description": "Lightweight documentation manager with interactive interface for LLM workflows",
   "author": "Jubal Mabaquiao <jubal.mabaquiao@gmail.com>",
   "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "localdocs": "./bin/localdocs"
   },
   "files": [
     "bin/",
+    "dist/",
+    "src/",
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
   "keywords": [
     "documentation",
     "cli",
@@ -20,7 +36,8 @@
     "interactive",
     "markdown",
     "local",
-    "knowledge-base"
+    "knowledge-base",
+    "typescript"
   ],
   "repository": {
     "type": "git",
@@ -30,8 +47,26 @@
   "bugs": {
     "url": "https://github.com/jubalm/localdocs/issues"
   },
-  "preferGlobal": false,
+  "preferGlobal": true,
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "chalk": "^4.1.2",
+    "terminal-kit": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/terminal-kit": "^2.5.6",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@types/jest": "^29.5.11",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.1.1",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
   }
 }
